@@ -1,0 +1,44 @@
+# Temporal Module Training Config (Stage 1)
+# Runs on cached features — L40S 48GB sufficient
+
+architecture:
+  d_vision: 1536          # Qwen2.5-VL-3B hidden dim
+  d_branch: 128           # per spatial stream feature dim
+  n_branches: 4           # number of spatial streams
+  n_heads_spatial: 4      # attention heads per branch query
+  diversity_weight: 0.1   # branch specialization loss weight
+  temporal_hidden: 64     # CNN hidden channels
+  temporal_out: 64        # CNN output channels
+  temporal_kernel: 3      # smaller than sensor model (was 7) — 16 frames vs 350 IMU steps
+  n_heads_temporal: 4     # same as sensor model
+  n_attn_layers: 2        # same as sensor model
+  cnn_dropout: 0.2
+  attn_dropout: 0.2
+  mlp_hidden: 128
+  mlp_dropout: 0.3
+  num_classes: 2          # needs_improvement vs good
+
+training:
+  num_epochs: 30
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  warmup_ratio: 0.05
+  scheduler: "cosine"
+  eta_min: 1.0e-6
+
+evaluation:
+  n_folds: 5
+  num_frames: 16
+
+data:
+  manifest: "~/VLM_TemporalBranch/cached_features/manifest.json"
+  feature_dir: "~/VLM_TemporalBranch/cached_features"
+
+output:
+  dir: "~/VLM_TemporalBranch/checkpoints/temporal_v1"
+
+hardware:
+  device: "auto"
+  seed: 42

@@ -1,0 +1,19 @@
+# Feature Extraction Config
+# Run once on A100 to cache per-frame patch tokens
+
+model:
+  name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  dtype: "bfloat16"
+  attn_implementation: "eager"
+
+video:
+  num_frames: 16
+  fps: 1.0
+
+data:
+  video_dir: "~/VLM_EatingBehavior/data/segmented_videos"
+  metadata_csv: "~/VLM_EatingBehavior/data/segments_metadata.csv"
+  output_dir: "~/VLM_TemporalBranch/cached_features"
+
+hardware:
+  device: "auto"  # auto-detect GPU

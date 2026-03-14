@@ -1,0 +1,50 @@
+# End-to-End Training Config (Stage 2)
+# Joint LoRA + Temporal Module — requires A100 80GB
+
+vlm:
+  model_name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  dtype: "bfloat16"
+  attn_implementation: "eager"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+temporal:
+  # Should match Stage 1 config
+  d_branch: 128
+  n_branches: 4
+  temporal_hidden: 64
+  temporal_out: 64
+  temporal_kernel: 3
+  n_heads: 4
+  n_attn_layers: 2
+  checkpoint: "~/VLM_TemporalBranch/checkpoints/temporal_v1/fold_{fold}/best_model.pt"
+
+integration:
+  n_inject_tokens: 4       # virtual tokens prepended to LM input
+  classification_weight: 0.5
+  lm_weight: 0.5
+
+training:
+  num_epochs: 5            # fewer epochs — LoRA + temporal already pre-trained
+  batch_size: 2
+  gradient_accumulation: 8  # effective batch size = 16
+  learning_rate: 2.0e-5    # LoRA LR
+  temporal_lr_multiplier: 10  # temporal module gets 10x the LoRA LR
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  warmup_ratio: 0.1
+
+data:
+  video_dir: "~/VLM_EatingBehavior/data/segmented_videos"
+  metadata_csv: "~/VLM_EatingBehavior/data/segments_metadata.csv"
+
+output:
+  dir: "~/VLM_TemporalBranch/checkpoints/e2e_v1"
+
+hardware:
+  device: "auto"
+  seed: 42

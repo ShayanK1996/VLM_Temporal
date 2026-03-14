@@ -1,0 +1,36 @@
+# Data & features (large, don't commit)
+cached_features/
+data/
+*.pt
+*.pth
+
+# Checkpoints
+checkpoints/
+outputs/
+
+# Logs
+logs/
+*.out
+*.err
+wandb/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace

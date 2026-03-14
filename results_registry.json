@@ -1,0 +1,39 @@
+{
+  "project": "VLM_TemporalBranch",
+  "description": "Spatial-branch temporal attention for VLM eating behavior assessment",
+  "baselines": {
+    "zero_shot": {
+      "accuracy": 0.241,
+      "source": "IMWUT paper Table 3",
+      "n_samples": 1432,
+      "labels": "4-class"
+    },
+    "majority_class": {
+      "accuracy": 0.543,
+      "labels": "binary"
+    },
+    "lora_only": {
+      "accuracy_mean": 0.632,
+      "accuracy_std": 0.067,
+      "per_fold": [0.624, 0.561, 0.742, 0.603, 0.630],
+      "source": "IMWUT paper Table 3",
+      "n_samples": 4223,
+      "labels": "binary",
+      "per_food": {
+        "chips_and_salsa": 0.726,
+        "carrots": 0.638,
+        "rice_and_beans": 0.536,
+        "churros": 0.520
+      }
+    },
+    "sensor_dilated_cnn_rope": {
+      "f1": 0.731,
+      "precision": 0.6952,
+      "recall": 0.7859,
+      "task": "bite_detection",
+      "modality": "IMU",
+      "source": "RF_CNN_Attention_v3.py, EXP-005"
+    }
+  },
+  "experiments": []
+}
