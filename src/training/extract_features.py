@@ -91,6 +91,7 @@ def extract_features_batch(
     labels: List[int],
     metadata_list: List[Dict],
     model_name: str,
+    lora_dir: Optional[str],
     num_frames: int,
     output_dir: Path,
     device: str = "cuda",
@@ -109,6 +110,21 @@ def extract_features_batch(
         torch_dtype=torch.bfloat16,
         attn_implementation="eager",
     ).to(device)
+
+    if lora_dir is not None:
+        lora_path = Path(lora_dir)
+        if not lora_path.exists():
+            raise FileNotFoundError(f"LoRA dir not found: {lora_dir}")
+        try:
+            from peft import PeftModel
+        except ImportError as e:
+            raise ImportError(
+                "peft is required to load LoRA adapters. Install it in your environment."
+            ) from e
+
+        print(f"Merging LoRA adapter from: {lora_dir}")
+        model = PeftModel.from_pretrained(model, lora_dir)
+        model = model.merge_and_unload()
     model.eval()
     
     # Freeze everything
@@ -237,6 +253,12 @@ def main():
     parser.add_argument("--output-dir", type=str, required=True,
                         help="Directory to save cached features")
     parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument(
+        "--lora-dir",
+        type=str,
+        default=None,
+        help="Optional LoRA adapter directory to merge into the base model before feature extraction.",
+    )
     parser.add_argument("--num-frames", type=int, default=16)
     parser.add_argument("--segment-types", type=str, nargs="*", default=None,
                         help="Filter to specific segment types (e.g., bite g3 g5)")
@@ -301,25 +323,43 @@ def main():
     if args.segment_types:
         print(f"  After filtering to {args.segment_types}: {len(video_paths)} segments")
     
-    # Assign participant-level folds (deterministic, seed=42)
-    unique_pids = sorted(set(m["participant_id"] for m in metadata_list))
-    rng = __import__('numpy').random.RandomState(42)
-    shuffled = list(unique_pids)
-    rng.shuffle(shuffled)
+    # Assign participant-level folds to match fixed CV splits from project context.
+    # If participant IDs don't match the expected set, fall back to a deterministic shuffle.
     n_folds = 5
-    fold_map = {}
-    fold_size = len(shuffled) // n_folds
-    remainder = len(shuffled) % n_folds
-    idx = 0
-    for fid in range(n_folds):
-        size = fold_size + (1 if fid < remainder else 0)
-        for _ in range(size):
-            if idx < len(shuffled):
-                fold_map[shuffled[idx]] = fid
-                idx += 1
-    
+    fixed_folds = {
+        0: ["111010", "211003", "111001", "211013", "111013", "111011"],
+        1: ["111015", "111003", "211011", "111007", "111004"],
+        2: ["111014", "211002", "111005", "111006", "211009"],
+        3: ["211004", "211010", "211005", "211015", "211008"],
+        4: ["111009", "111012", "211001", "211006", "111008"],
+    }
+    fixed_fold_map = {pid: fid for fid, pids in fixed_folds.items() for pid in pids}
+
+    unique_pids = sorted(set(m["participant_id"] for m in metadata_list))
+    if set(unique_pids).issubset(set(fixed_fold_map.keys())):
+        fold_map = fixed_fold_map
+        print("  Using fixed participant-level fold mapping (from CURSOR_CONTEXT.md).")
+    else:
+        print(
+            "  WARNING: participant IDs don't match fixed fold mapping; "
+            "falling back to deterministic shuffle (seed=42)."
+        )
+        rng = np.random.RandomState(42)
+        shuffled = list(unique_pids)
+        rng.shuffle(shuffled)
+        fold_map = {}
+        fold_size = len(shuffled) // n_folds
+        remainder = len(shuffled) % n_folds
+        idx = 0
+        for fid in range(n_folds):
+            size = fold_size + (1 if fid < remainder else 0)
+            for _ in range(size):
+                if idx < len(shuffled):
+                    fold_map[shuffled[idx]] = fid
+                    idx += 1
+
     for m in metadata_list:
-        m["fold"] = fold_map[m["participant_id"]]
+        m["fold"] = fold_map.get(m["participant_id"], -1)
     
     print(f"  Fold assignments: { {fid: sum(1 for m in metadata_list if m['fold'] == fid) for fid in range(n_folds)} }")
     
@@ -328,6 +368,7 @@ def main():
         labels=labels,
         metadata_list=metadata_list,
         model_name=args.model_name,
+        lora_dir=args.lora_dir,
         num_frames=args.num_frames,
         output_dir=Path(args.output_dir),
         device=device,

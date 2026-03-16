@@ -3,7 +3,7 @@
 #SBATCH --partition=uri-gpu
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=a100-80g
-#SBATCH --mem=64G
+#SBATCH --mem=160G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/extract_features_%j.out
@@ -29,6 +29,33 @@ REPO_DIR="$HOME/VLM_TemporalBranch"
 DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
 OUTPUT_DIR="$HOME/VLM_TemporalBranch/cached_features"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
+RUN_ID="20260311_171539_A53569"
+LORA_DIR="${LORA_DIR:-$HOME/VLM_EatingBehavior/checkpoints/fold_0}"
+
+if [ ! -d "$LORA_DIR" ]; then
+  # Common layout: checkpoints stored under a run id folder (you mentioned this exists on Unity)
+  if [ -d "$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}/fold_0" ]; then
+    LORA_DIR="$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}/fold_0"
+  elif [ -d "$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}_main/fold_0" ]; then
+    LORA_DIR="$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}_main/fold_0"
+  # Fallback: repo-local uploaded checkpoints (useful for local testing / staging)
+  elif [ -d "$REPO_DIR/${RUN_ID}_main/fold_0" ]; then
+    LORA_DIR="$REPO_DIR/${RUN_ID}_main/fold_0"
+  elif [ -d "$REPO_DIR/${RUN_ID}/fold_0" ]; then
+    LORA_DIR="$REPO_DIR/${RUN_ID}/fold_0"
+  fi
+fi
+
+if [ ! -d "$LORA_DIR" ]; then
+  echo "ERROR: Could not find LoRA directory. Set LORA_DIR env var to the fold folder containing adapter_model.safetensors."
+  echo "Tried:"
+  echo "  - \$HOME/VLM_EatingBehavior/checkpoints/fold_0"
+  echo "  - \$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}/fold_0"
+  echo "  - \$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}_main/fold_0"
+  echo "  - \$HOME/VLM_TemporalBranch/${RUN_ID}_main/fold_0"
+  echo "  - \$HOME/VLM_TemporalBranch/${RUN_ID}/fold_0"
+  exit 2
+fi
 
 mkdir -p logs "$OUTPUT_DIR"
 
@@ -38,12 +65,14 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "Start: $(date)"
+echo "LoRA dir: $LORA_DIR"
 echo ""
 
 python -m src.training.extract_features \
     --dataset-jsonl "$DATASET_JSONL" \
     --output-dir "$OUTPUT_DIR" \
     --model-name "$MODEL_NAME" \
+    --lora-dir "$LORA_DIR" \
     --num-frames 16
 
 echo ""
