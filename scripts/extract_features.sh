@@ -17,8 +17,20 @@
 
 set -euo pipefail
 
-# --- Conda setup ---
-eval "$(/home/$USER/miniconda3/bin/conda shell.bash hook 2>/dev/null || /home/$USER/anaconda3/bin/conda shell.bash hook 2>/dev/null)"
+# --- Conda setup (Unity HPC uses module; fallback for local miniconda) ---
+if command -v module &>/dev/null; then
+  module load conda/latest 2>/dev/null || true
+fi
+if command -v conda &>/dev/null; then
+  eval "$(conda shell.bash hook)"
+elif [ -x "/home/$USER/miniconda3/bin/conda" ]; then
+  eval "$(/home/$USER/miniconda3/bin/conda shell.bash hook)"
+elif [ -x "/home/$USER/anaconda3/bin/conda" ]; then
+  eval "$(/home/$USER/anaconda3/bin/conda shell.bash hook)"
+else
+  echo "ERROR: conda not found. Run 'module load conda/latest' or install conda."
+  exit 1
+fi
 conda activate VLM_EatingBehavior
 
 # --- Paths ---
