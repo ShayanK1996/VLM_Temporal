@@ -34,14 +34,29 @@ fi
 conda activate VLM_EatingBehavior
 
 # --- Paths ---
-# REPO_DIR = directory containing this script's parent (so it works from VLM_Temporal or VLM_TemporalBranch)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# IMPORTANT: Under SLURM, the script runs from a temp spool directory
+# (e.g. /var/spool/slurm/...), so ${BASH_SOURCE[0]} is NOT your repo.
+# Use the submit directory (repo root) unless REPO_DIR is explicitly set.
+REPO_DIR="${REPO_DIR:-${SLURM_SUBMIT_DIR:-$HOME/VLM_Temporal}}"
+if [ ! -d "$REPO_DIR/src" ]; then
+  if [ -d "$HOME/VLM_Temporal/src" ]; then
+    REPO_DIR="$HOME/VLM_Temporal"
+  elif [ -d "$HOME/VLM_TemporalBranch/src" ]; then
+    REPO_DIR="$HOME/VLM_TemporalBranch"
+  else
+    echo "ERROR: REPO_DIR does not look like the repo root (missing src/)."
+    echo "Submit from the repo root, e.g.:"
+    echo "  cd ~/VLM_Temporal && sbatch scripts/extract_features.sh"
+    echo "Or set REPO_DIR explicitly in the sbatch command:"
+    echo "  REPO_DIR=/path/to/repo sbatch scripts/extract_features.sh"
+    exit 2
+  fi
+fi
 # Reads qwen_dataset.jsonl directly — no intermediate CSV needed.
 # Video paths inside the JSONL are absolute Unity paths:
 #   /home/skhodabakhsh_uri_edu/VLM_EatingBehavior/data/processed/training_clips/*.mp4
 DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
-OUTPUT_DIR="${REPO_DIR}/cached_features"
+OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/cached_features}"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
 RUN_ID="20260311_171539_A53569"
 LORA_DIR="${LORA_DIR:-$HOME/VLM_EatingBehavior/checkpoints/fold_0}"
@@ -71,14 +86,14 @@ if [ ! -d "$LORA_DIR" ]; then
   exit 2
 fi
 
-mkdir -p logs "$OUTPUT_DIR"
-
 cd "$REPO_DIR"
+mkdir -p logs "$OUTPUT_DIR"
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "Start: $(date)"
+echo "Repo dir: $REPO_DIR"
 echo "LoRA dir: $LORA_DIR"
 echo ""
 
