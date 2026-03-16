@@ -34,12 +34,14 @@ fi
 conda activate VLM_EatingBehavior
 
 # --- Paths ---
+# REPO_DIR = directory containing this script's parent (so it works from VLM_Temporal or VLM_TemporalBranch)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Reads qwen_dataset.jsonl directly — no intermediate CSV needed.
 # Video paths inside the JSONL are absolute Unity paths:
 #   /home/skhodabakhsh_uri_edu/VLM_EatingBehavior/data/processed/training_clips/*.mp4
-REPO_DIR="$HOME/VLM_TemporalBranch"
 DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
-OUTPUT_DIR="$HOME/VLM_TemporalBranch/cached_features"
+OUTPUT_DIR="${REPO_DIR}/cached_features"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
 RUN_ID="20260311_171539_A53569"
 LORA_DIR="${LORA_DIR:-$HOME/VLM_EatingBehavior/checkpoints/fold_0}"
@@ -64,8 +66,8 @@ if [ ! -d "$LORA_DIR" ]; then
   echo "  - \$HOME/VLM_EatingBehavior/checkpoints/fold_0"
   echo "  - \$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}/fold_0"
   echo "  - \$HOME/VLM_EatingBehavior/checkpoints/${RUN_ID}_main/fold_0"
-  echo "  - \$HOME/VLM_TemporalBranch/${RUN_ID}_main/fold_0"
-  echo "  - \$HOME/VLM_TemporalBranch/${RUN_ID}/fold_0"
+  echo "  - \$REPO_DIR (${REPO_DIR})/${RUN_ID}_main/fold_0"
+  echo "  - \$REPO_DIR/${RUN_ID}/fold_0"
   exit 2
 fi
 
