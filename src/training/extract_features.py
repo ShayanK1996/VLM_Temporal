@@ -62,8 +62,9 @@ def load_video_frames(
                 {
                     "type": "video",
                     "video": video_path,
+                    # IMPORTANT: qwen_vl_utils video loader expects *either* fps or nframes.
+                    # Passing both can cause backend errors (and lead to skipping all samples).
                     "nframes": num_frames,
-                    "fps": 1.0,  # 1 fps sampling
                 },
                 {
                     "type": "text",
@@ -160,7 +161,6 @@ def extract_features_batch(
                         "type": "video",
                         "video": str(vpath),
                         "nframes": num_frames,
-                        "fps": 1.0,
                     },
                     {"type": "text", "text": "Analyze eating behavior."},
                 ],
