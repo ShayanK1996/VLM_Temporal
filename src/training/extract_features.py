@@ -32,7 +32,46 @@ from typing import Dict, List, Optional
 
 import torch
 import numpy as np
+from PIL import Image
 from tqdm import tqdm
+
+
+def _read_video_pyav(path: str, num_frames: int) -> List[Image.Image]:
+    """Read uniformly-sampled frames from a video using PyAV.
+
+    Handles both .mov and .mp4 reliably, unlike decord/torchvision backends
+    which fail on many .mov files with 'video_fps' KeyError.
+    """
+    import av
+
+    container = av.open(path)
+    stream = container.streams.video[0]
+    total_frames = stream.frames
+    if total_frames == 0:
+        # Some containers don't report frame count; decode to count
+        total_frames = sum(1 for _ in container.decode(video=0))
+        container.close()
+        container = av.open(path)
+
+    if total_frames == 0:
+        container.close()
+        raise ValueError(f"No video frames found in {path}")
+
+    indices = set(np.linspace(0, total_frames - 1, num_frames, dtype=int).tolist())
+    frames = []
+    for i, frame in enumerate(container.decode(video=0)):
+        if i in indices:
+            frames.append(frame.to_image())  # -> PIL.Image
+        if len(frames) == num_frames:
+            break
+    container.close()
+
+    if len(frames) < num_frames:
+        # Pad by repeating last frame if video is shorter than requested
+        while len(frames) < num_frames:
+            frames.append(frames[-1].copy())
+
+    return frames
 
 
 def extract_features_batch(
@@ -50,8 +89,6 @@ def extract_features_batch(
         Qwen2_5_VLForConditionalGeneration,
         Qwen2_5_VLProcessor,
     )
-    from qwen_vl_utils import process_vision_info
-
     print(f"Loading model: {model_name}")
     processor = Qwen2_5_VLProcessor.from_pretrained(model_name)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -130,14 +167,17 @@ def extract_features_batch(
         ]
 
         try:
-            image_inputs, video_inputs = process_vision_info(messages)
+            # Read frames with PyAV — handles .mov and .mp4 reliably,
+            # bypassing qwen_vl_utils's buggy decord/torchvision backends.
+            pil_frames = _read_video_pyav(str(vpath), num_frames)
+
             text = processor.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
             inputs = processor(
                 text=[text],
-                images=image_inputs,
-                videos=video_inputs,
+                images=None,
+                videos=[pil_frames],
                 return_tensors="pt",
                 padding=True,
             ).to(device)
