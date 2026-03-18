@@ -79,9 +79,24 @@ def extract_features_batch(
     for param in model.parameters():
         param.requires_grad = False
 
-    # Qwen2_5_VLForConditionalGeneration wraps the actual model;
-    # the vision encoder is at model.model.visual, not model.visual.
-    visual_encoder = model.model.visual if hasattr(model, "model") else model.visual
+    # Find the visual encoder — attribute path varies across transformers versions
+    # and PeftModel wrapping depth.
+    if hasattr(model, "model") and hasattr(model.model, "visual"):
+        visual_encoder = model.model.visual
+    elif hasattr(model, "visual"):
+        visual_encoder = model.visual
+    elif (
+        hasattr(model, "model")
+        and hasattr(model.model, "model")
+        and hasattr(model.model.model, "visual")
+    ):
+        # PeftModel wrapping: peft -> qwen_conditional -> qwen_model -> visual
+        visual_encoder = model.model.model.visual
+    else:
+        raise AttributeError(
+            f"Cannot find visual encoder on {type(model).__name__}. "
+            f"Top-level attrs: {[a for a in dir(model) if not a.startswith('_')]}"
+        )
     print(f"Visual encoder: {type(visual_encoder).__name__}")
 
     manifest = []
@@ -108,7 +123,7 @@ def extract_features_batch(
             {
                 "role": "user",
                 "content": [
-                    {"type": "video", "video": str(vpath), "fps": 1.0},
+                    {"type": "video", "video": str(vpath), "nframes": num_frames},
                     {"type": "text", "text": "Analyze eating behavior."},
                 ],
             }
