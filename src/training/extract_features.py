@@ -35,58 +35,6 @@ import numpy as np
 from tqdm import tqdm
 
 
-def load_video_frames(
-    video_path: str,
-    num_frames: int = 16,
-) -> Optional[Dict]:
-    """Load and preprocess a video segment for Qwen2.5-VL.
-    
-    Uses the Qwen2.5-VL processor to handle frame sampling and preprocessing.
-    
-    Returns:
-        dict with 'pixel_values', 'image_grid_thw' ready for the vision encoder,
-        or None if loading fails.
-    """
-    try:
-        from qwen_vl_utils import process_vision_info
-        from transformers import Qwen2_5_VLProcessor
-    except ImportError:
-        print("ERROR: qwen_vl_utils not installed. pip install qwen-vl-utils")
-        sys.exit(1)
-    
-    # Build message format that Qwen2.5-VL processor expects
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "video",
-                    "video": video_path,
-                    # IMPORTANT: qwen_vl_utils video loader expects *either* fps or nframes.
-                    # We use 1 fps sampling (fixed rate) and let downstream code pad/truncate.
-                    "fps": 1.0,
-                },
-                {
-                    "type": "text",
-                    "text": "placeholder",  # won't use the text, just need video processed
-                },
-            ],
-        }
-    ]
-    
-    try:
-        # Process video info to get frame data
-        image_inputs, video_inputs = process_vision_info(messages)
-        return {
-            "image_inputs": image_inputs,
-            "video_inputs": video_inputs,
-            "messages": messages,
-        }
-    except Exception as e:
-        print(f"  WARNING: Failed to load {video_path}: {e}")
-        return None
-
-
 def extract_features_batch(
     video_paths: List[str],
     labels: List[int],
@@ -103,7 +51,7 @@ def extract_features_batch(
         Qwen2_5_VLProcessor,
     )
     from qwen_vl_utils import process_vision_info
-    
+
     print(f"Loading model: {model_name}")
     processor = Qwen2_5_VLProcessor.from_pretrained(model_name)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -127,21 +75,25 @@ def extract_features_batch(
         model = PeftModel.from_pretrained(model, lora_dir)
         model = model.merge_and_unload()
     model.eval()
-    
-    # Freeze everything
+
     for param in model.parameters():
         param.requires_grad = False
-    
+
+    # Qwen2_5_VLForConditionalGeneration wraps the actual model;
+    # the vision encoder is at model.model.visual, not model.visual.
+    visual_encoder = model.model.visual if hasattr(model, "model") else model.visual
+    print(f"Visual encoder: {type(visual_encoder).__name__}")
+
     manifest = []
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+    n_errors = 0
+
     for idx, (vpath, label, meta) in enumerate(
         tqdm(zip(video_paths, labels, metadata_list), total=len(video_paths), desc="Extracting")
     ):
         segment_id = f"segment_{idx:05d}"
         output_path = output_dir / f"{segment_id}.pt"
-        
-        # Skip if already extracted
+
         if output_path.exists():
             manifest.append({
                 "segment_id": segment_id,
@@ -151,25 +103,22 @@ def extract_features_batch(
                 **meta,
             })
             continue
-        
-        # Build messages for processor
+
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "video",
-                        "video": str(vpath),
-                        "fps": 1.0,
-                    },
+                    {"type": "video", "video": str(vpath), "fps": 1.0},
                     {"type": "text", "text": "Analyze eating behavior."},
                 ],
             }
         ]
-        
+
         try:
             image_inputs, video_inputs = process_vision_info(messages)
-            text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            text = processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
             inputs = processor(
                 text=[text],
                 images=image_inputs,
@@ -177,70 +126,62 @@ def extract_features_batch(
                 return_tensors="pt",
                 padding=True,
             ).to(device)
-            
+
             with torch.no_grad():
-                # Extract vision features
                 pixel_values = inputs.get("pixel_values")
                 image_grid_thw = inputs.get("image_grid_thw")
-                
+
                 if pixel_values is None:
-                    # Try video-specific keys
                     pixel_values = inputs.get("pixel_values_videos")
                     image_grid_thw = inputs.get("video_grid_thw")
-                
+
                 if pixel_values is None:
                     print(f"  WARNING: No pixel values for {vpath}, skipping")
+                    n_errors += 1
                     continue
-                
-                # Run through vision encoder
-                # Qwen2_5_VLForConditionalGeneration wraps the actual model;
-                # the vision encoder is at model.model.visual, not model.visual.
-                visual_encoder = model.model.visual if hasattr(model, 'model') else model.visual
+
                 vision_output = visual_encoder(pixel_values, grid_thw=image_grid_thw)
-                # vision_output: (total_patches, d_vision)
-                
-                # Reshape to per-frame
+
                 t, h, w = image_grid_thw[0].tolist()
                 t, h, w = int(t), int(h), int(w)
                 patches_per_frame = h * w
                 d_vision = vision_output.shape[-1]
-                
+
                 frame_patches = vision_output.reshape(
-                    int(t), patches_per_frame, d_vision
-                ).cpu().to(torch.float16)  # Save as fp16 to reduce disk
-                
-                # Save
+                    t, patches_per_frame, d_vision
+                ).cpu().to(torch.float16)
+
                 torch.save({
-                    'patches': frame_patches,        # (T, num_patches, d_vision)
-                    'label': label,
-                    'num_frames': int(t),
-                    'patches_per_frame': patches_per_frame,
-                    'd_vision': d_vision,
-                    'metadata': meta,
+                    "patches": frame_patches,
+                    "label": label,
+                    "num_frames": t,
+                    "patches_per_frame": patches_per_frame,
+                    "d_vision": d_vision,
+                    "metadata": meta,
                 }, output_path)
-                
+
                 manifest.append({
                     "segment_id": segment_id,
                     "video_path": str(vpath),
                     "label": label,
-                    "num_frames": int(t),
+                    "num_frames": t,
                     "patches_per_frame": patches_per_frame,
                     "d_vision": d_vision,
                     "cached_path": str(output_path),
                     **meta,
                 })
-                
+
         except Exception as e:
             print(f"  ERROR on {vpath}: {e}")
+            n_errors += 1
             continue
-        
-        # Periodic save of manifest
+
         if (idx + 1) % 100 == 0:
             _save_manifest(manifest, output_dir)
-            print(f"  Saved manifest ({len(manifest)} segments)")
-    
+            print(f"  Saved manifest ({len(manifest)} segments, {n_errors} errors)")
+
     _save_manifest(manifest, output_dir)
-    print(f"\nDone! Extracted {len(manifest)} segments to {output_dir}")
+    print(f"\nDone! Extracted {len(manifest)} segments to {output_dir} ({n_errors} errors)")
     return manifest
 
 
