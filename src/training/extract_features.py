@@ -193,7 +193,10 @@ def extract_features_batch(
                     continue
                 
                 # Run through vision encoder
-                vision_output = model.visual(pixel_values, grid_thw=image_grid_thw)
+                # Qwen2_5_VLForConditionalGeneration wraps the actual model;
+                # the vision encoder is at model.model.visual, not model.visual.
+                visual_encoder = model.model.visual if hasattr(model, 'model') else model.visual
+                vision_output = visual_encoder(pixel_values, grid_thw=image_grid_thw)
                 # vision_output: (total_patches, d_vision)
                 
                 # Reshape to per-frame
