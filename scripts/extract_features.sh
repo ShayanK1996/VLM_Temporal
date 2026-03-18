@@ -102,7 +102,8 @@ python -m src.training.extract_features \
     --output-dir "$OUTPUT_DIR" \
     --model-name "$MODEL_NAME" \
     --lora-dir "$LORA_DIR" \
-    --num-frames 16
+    --num-frames 16 \
+    --segment-types bite
 
 echo ""
 echo "Finished: $(date)"
