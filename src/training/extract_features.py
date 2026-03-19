@@ -196,6 +196,9 @@ def extract_features_batch(
                     continue
 
                 vision_output = visual_encoder(pixel_values, grid_thw=image_grid_thw)
+                # Unwrap BaseModelOutputWithPooling → raw tensor
+                if hasattr(vision_output, 'last_hidden_state'):
+                    vision_output = vision_output.last_hidden_state
 
                 t, h, w = image_grid_thw[0].tolist()
                 t, h, w = int(t), int(h), int(w)
