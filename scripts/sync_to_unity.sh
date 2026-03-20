@@ -11,7 +11,7 @@ set -euo pipefail
 
 # --- Config (customize if needed) ---
 UNITY_HOST="${UNITY_HOST:-unityhpc}"
-REMOTE_DIR="${REMOTE_DIR:-VLM_TemporalBranch}"
+REMOTE_DIR="${REMOTE_DIR:-VLM_Temporal}"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "Syncing $LOCAL_DIR -> ${UNITY_HOST}:~/${REMOTE_DIR}/"

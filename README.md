@@ -70,6 +70,23 @@ sbatch scripts/train_temporal.sh
 sbatch scripts/train_e2e.sh
 ```
 
+### Unity HPC: where features & checkpoints go
+
+By default, `extract_features.sh`, `train_temporal.sh`, and `train_e2e.sh` write large artifacts under **`/work/pi_walls_uri_edu/$USER/VLM_Temporal/`** when that path is writable (so `$HOME` does not fill up):
+
+- `cached_features/` — `.pt` caches + `manifest.json`
+- `checkpoints/temporal_v1/` — stage 1
+- `checkpoints/e2e_v1/` — stage 2
+
+If `/work/...` is unavailable, they fall back to the **repo root** next to `src/`. Override anytime:
+
+```bash
+export VLM_WORK_ROOT=/your/preferred/root
+sbatch scripts/extract_features.sh
+```
+
+On Unity the repo is often `~/VLM_Temporal`; submit from that directory (or set `REPO_DIR`).
+
 ## Repo Structure
 
 ```

@@ -33,11 +33,12 @@ evaluation:
   num_frames: 16
 
 data:
-  manifest: "~/VLM_TemporalBranch/cached_features/manifest.json"
-  feature_dir: "~/VLM_TemporalBranch/cached_features"
+  # Unity default: under /work/pi_walls_uri_edu/$USER/VLM_Temporal/cached_features (see scripts/train_temporal.sh)
+  manifest: "~/VLM_Temporal/cached_features/manifest.json"
+  feature_dir: "~/VLM_Temporal/cached_features"
 
 output:
-  dir: "~/VLM_TemporalBranch/checkpoints/temporal_v1"
+  dir: "~/VLM_Temporal/checkpoints/temporal_v1"
 
 hardware:
   device: "auto"

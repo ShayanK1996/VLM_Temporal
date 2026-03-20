@@ -13,7 +13,8 @@ video:
 data:
   video_dir: "~/VLM_EatingBehavior/data/segmented_videos"
   metadata_csv: "~/VLM_EatingBehavior/data/segments_metadata.csv"
-  output_dir: "~/VLM_TemporalBranch/cached_features"
+  # Unity default in scripts: /work/pi_walls_uri_edu/$USER/VLM_Temporal/cached_features (env VLM_WORK_ROOT)
+  output_dir: "~/VLM_Temporal/cached_features"
 
 hardware:
   device: "auto"  # auto-detect GPU

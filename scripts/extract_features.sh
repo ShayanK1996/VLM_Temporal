@@ -56,7 +56,20 @@ fi
 # Video paths inside the JSONL are absolute Unity paths:
 #   /home/skhodabakhsh_uri_edu/VLM_EatingBehavior/data/processed/training_clips/*.mp4
 DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/cached_features}"
+
+# Large artifacts: prefer PI /work (Unity) so $HOME does not fill up.
+# Override with: VLM_WORK_ROOT=/path/to/root sbatch ...
+if [ -n "${VLM_WORK_ROOT:-}" ]; then
+  :
+else
+  _w="/work/pi_walls_uri_edu/$USER/VLM_Temporal"
+  if mkdir -p "$_w" 2>/dev/null; then
+    VLM_WORK_ROOT="$_w"
+  else
+    VLM_WORK_ROOT="$REPO_DIR"
+  fi
+fi
+OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/cached_features}"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
 RUN_ID="20260311_171539_A53569"
 LORA_DIR="${LORA_DIR:-$HOME/VLM_EatingBehavior/checkpoints/fold_0}"
@@ -94,6 +107,8 @@ echo "Node: $(hostname)"
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "Start: $(date)"
 echo "Repo dir: $REPO_DIR"
+echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
+echo "Feature output: $OUTPUT_DIR"
 echo "LoRA dir: $LORA_DIR"
 echo ""
 

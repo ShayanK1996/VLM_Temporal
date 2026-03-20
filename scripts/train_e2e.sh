@@ -16,14 +16,48 @@
 
 set -euo pipefail
 
-eval "$(/home/$USER/miniconda3/bin/conda shell.bash hook 2>/dev/null || /home/$USER/anaconda3/bin/conda shell.bash hook 2>/dev/null)"
+if command -v module &>/dev/null; then
+  module load conda/latest 2>/dev/null || true
+fi
+if command -v conda &>/dev/null; then
+  eval "$(conda shell.bash hook)"
+elif [ -x "/home/$USER/miniconda3/bin/conda" ]; then
+  eval "$(/home/$USER/miniconda3/bin/conda shell.bash hook)"
+elif [ -x "/home/$USER/anaconda3/bin/conda" ]; then
+  eval "$(/home/$USER/anaconda3/bin/conda shell.bash hook)"
+else
+  echo "ERROR: conda not found."
+  exit 1
+fi
 conda activate VLM_EatingBehavior
 
-REPO_DIR="$HOME/VLM_TemporalBranch"
+REPO_DIR="${REPO_DIR:-${SLURM_SUBMIT_DIR:-$HOME/VLM_Temporal}}"
+if [ ! -d "$REPO_DIR/src" ]; then
+  if [ -d "$HOME/VLM_Temporal/src" ]; then
+    REPO_DIR="$HOME/VLM_Temporal"
+  elif [ -d "$HOME/VLM_TemporalBranch/src" ]; then
+    REPO_DIR="$HOME/VLM_TemporalBranch"
+  else
+    echo "ERROR: REPO_DIR does not look like the repo root (missing src/)."
+    exit 2
+  fi
+fi
+
+if [ -n "${VLM_WORK_ROOT:-}" ]; then
+  :
+else
+  _w="/work/pi_walls_uri_edu/$USER/VLM_Temporal"
+  if mkdir -p "$_w" 2>/dev/null; then
+    VLM_WORK_ROOT="$_w"
+  else
+    VLM_WORK_ROOT="$REPO_DIR"
+  fi
+fi
+
 VIDEO_DIR="$HOME/VLM_EatingBehavior/data/segmented_videos"
 METADATA_CSV="$HOME/VLM_EatingBehavior/data/segments_metadata.csv"
-TEMPORAL_CKPT="$HOME/VLM_TemporalBranch/checkpoints/temporal_v1/fold_0/best_model.pt"
-OUTPUT_DIR="$HOME/VLM_TemporalBranch/checkpoints/e2e_v1"
+TEMPORAL_CKPT="${TEMPORAL_CKPT:-${VLM_WORK_ROOT}/checkpoints/temporal_v1/fold_0/best_model.pt}"
+OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/e2e_v1}"
 FOLD=0
 
 mkdir -p logs "$OUTPUT_DIR"
