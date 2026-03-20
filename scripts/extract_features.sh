@@ -57,18 +57,11 @@ fi
 #   /home/skhodabakhsh_uri_edu/VLM_EatingBehavior/data/processed/training_clips/*.mp4
 DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
 
-# Large artifacts: prefer PI /work (Unity) so $HOME does not fill up.
-# Override with: VLM_WORK_ROOT=/path/to/root sbatch ...
-if [ -n "${VLM_WORK_ROOT:-}" ]; then
-  :
-else
-  _w="/work/pi_walls_uri_edu/$USER/VLM_Temporal"
-  if mkdir -p "$_w" 2>/dev/null; then
-    VLM_WORK_ROOT="$_w"
-  else
-    VLM_WORK_ROOT="$REPO_DIR"
-  fi
-fi
+# Cached .pt + manifest live ONLY under /work/.../VLM_Temporal (see lib_vlm_work_root.sh)
+# Local dev: export VLM_WORK_ROOT=/your/writable/path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib_vlm_work_root.sh
+source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
 OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/cached_features}"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
 RUN_ID="20260311_171539_A53569"

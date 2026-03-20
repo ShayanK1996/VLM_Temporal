@@ -72,13 +72,14 @@ sbatch scripts/train_e2e.sh
 
 ### Unity HPC: where features & checkpoints go
 
-By default, `extract_features.sh`, `train_temporal.sh`, and `train_e2e.sh` write large artifacts under **`/work/pi_walls_uri_edu/$USER/VLM_Temporal/`** when that path is writable (so `$HOME` does not fill up):
+**Cached features and temporal/e2e checkpoints use one tree only:**  
+`/work/pi_walls_uri_edu/$USER/VLM_Temporal/` (not under the repo clone — keeps `$HOME` free).
 
-- `cached_features/` — `.pt` caches + `manifest.json`
+- `cached_features/` — `.pt` caches + `manifest.json` (same path training reads)
 - `checkpoints/temporal_v1/` — stage 1
 - `checkpoints/e2e_v1/` — stage 2
 
-If `/work/...` is unavailable, they fall back to the **repo root** next to `src/`. Override anytime:
+If that directory cannot be created, the job exits with an error. For **local machines** without `/work`, set a writable root:
 
 ```bash
 export VLM_WORK_ROOT=/your/preferred/root

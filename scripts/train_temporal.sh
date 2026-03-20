@@ -5,8 +5,8 @@
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=04:00:00
-#SBATCH --output=logs/train_temporal_%j.out
-#SBATCH --error=logs/train_temporal_%j.err
+#SBATCH --output=logs_stage_1/train_temporal_%j.out
+#SBATCH --error=logs_stage_1/train_temporal_%j.err
 
 # ============================================================
 # Stage 1: Train Spatial Decomposition + Temporal Attention
@@ -45,17 +45,9 @@ if [ ! -d "$REPO_DIR/src" ]; then
   fi
 fi
 
-# Features + temporal checkpoints default next to repo on local disk, or under /work on Unity
-if [ -n "${VLM_WORK_ROOT:-}" ]; then
-  :
-else
-  _w="/work/pi_walls_uri_edu/$USER/VLM_Temporal"
-  if mkdir -p "$_w" 2>/dev/null; then
-    VLM_WORK_ROOT="$_w"
-  else
-    VLM_WORK_ROOT="$REPO_DIR"
-  fi
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib_vlm_work_root.sh
+source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
 FEATURE_DIR="${FEATURE_DIR:-${VLM_WORK_ROOT}/cached_features}"
 MANIFEST="${MANIFEST:-$FEATURE_DIR/manifest.json}"
 OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
@@ -76,7 +68,7 @@ DIVERSITY_WEIGHT=0.1
 # Default: fold 0 only
 FOLD_ARG="--fold 0"
 
-mkdir -p logs "$OUTPUT_DIR"
+mkdir -p logs_stage_1 "$OUTPUT_DIR"
 
 cd "$REPO_DIR"
 

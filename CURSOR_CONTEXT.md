@@ -31,8 +31,8 @@ The temporal module architecture is adapted from a proven IMU-based bite detecti
 ├── src/evaluation/            ← evaluation with comparison to IMWUT baselines
 └── scripts/                   ← SLURM job scripts for Unity HPC
 
-/work/pi_walls_uri_edu/$USER/VLM_Temporal/   ← default large-artifact root on Unity (env: VLM_WORK_ROOT)
-├── cached_features/           ← Stage 0: .pt + manifest.json (falls back to REPO_DIR if /work unavailable)
+/work/pi_walls_uri_edu/$USER/VLM_Temporal/   ← ONLY large-artifact root on Unity (cached_features + checkpoints; env VLM_WORK_ROOT overrides for local dev)
+├── cached_features/           ← Stage 0: .pt + manifest.json
 └── checkpoints/               ← temporal_v1, e2e_v1
 ```
 
@@ -127,7 +127,7 @@ sbatch scripts/extract_features.sh
 
 - Loads base Qwen2.5-VL + merges LoRA checkpoint from IMWUT fine-tuning
 - Runs each video clip through the fine-tuned vision encoder
-- Saves per-frame patch tokens as `.pt` files in `cached_features/` (default location on Unity: `/work/pi_walls_uri_edu/$USER/VLM_Temporal/cached_features/`; override with env `VLM_WORK_ROOT`, or falls back to repo root if `/work` is unavailable)
+- Saves per-frame patch tokens as `.pt` files under `/work/pi_walls_uri_edu/$USER/VLM_Temporal/cached_features/` only on Unity (see `scripts/lib_vlm_work_root.sh`; set `VLM_WORK_ROOT` elsewhere)
 - Creates `manifest.json` in that same directory with all metadata + fold assignments
 - **Requires**: A100 80GB, ~3-4 hours for 4,251 segments
 - **Important**: Uses fine-tuned (not base) vision encoder so features already understand eating behavior

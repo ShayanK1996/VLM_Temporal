@@ -43,16 +43,9 @@ if [ ! -d "$REPO_DIR/src" ]; then
   fi
 fi
 
-if [ -n "${VLM_WORK_ROOT:-}" ]; then
-  :
-else
-  _w="/work/pi_walls_uri_edu/$USER/VLM_Temporal"
-  if mkdir -p "$_w" 2>/dev/null; then
-    VLM_WORK_ROOT="$_w"
-  else
-    VLM_WORK_ROOT="$REPO_DIR"
-  fi
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib_vlm_work_root.sh
+source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
 
 VIDEO_DIR="$HOME/VLM_EatingBehavior/data/segmented_videos"
 METADATA_CSV="$HOME/VLM_EatingBehavior/data/segments_metadata.csv"
