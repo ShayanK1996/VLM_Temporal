@@ -38,10 +38,9 @@ N_HEADS=4
 N_ATTN_LAYERS=2
 DIVERSITY_WEIGHT=0.1
 
-# --- Optional: run single fold for debugging ---
-# Add --fold 0 to run only fold 0
-FOLD_ARG=""
-# FOLD_ARG="--fold 0"
+# --- Run single fold for validation/debug ---
+# Default: fold 0 only
+FOLD_ARG="--fold 0"
 
 mkdir -p logs "$OUTPUT_DIR"
 
