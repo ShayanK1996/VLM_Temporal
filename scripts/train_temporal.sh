@@ -2,9 +2,9 @@
 #SBATCH --job-name=vlm_temporal_train
 #SBATCH --partition=uri-gpu
 #SBATCH --gres=gpu:1
-#SBATCH --mem=48G
+#SBATCH --mem=160G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=04:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --output=logs_stage_1/train_temporal_%j.out
 #SBATCH --error=logs_stage_1/train_temporal_%j.err
 
