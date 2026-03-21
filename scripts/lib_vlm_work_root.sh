@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Source from other scripts:  source "$(dirname "$0")/lib_vlm_work_root.sh"
+# Source from batch scripts after REPO_DIR is set, e.g.:
+#   source "${REPO_DIR}/scripts/lib_vlm_work_root.sh"
+# (Do not use dirname "${BASH_SOURCE[0]}" — under SLURM the script runs from /var/spool/slurm/...)
 #
 # Unity HPC: cached_features (.pt + manifest) and temporal/e2e checkpoints live ONLY
 # under this tree — not under the repo clone. Override for local dev:

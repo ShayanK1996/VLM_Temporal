@@ -43,9 +43,9 @@ if [ ! -d "$REPO_DIR/src" ]; then
   fi
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SLURM copies the batch script to /var/spool/... — must not use BASH_SOURCE for lib path
 # shellcheck source=scripts/lib_vlm_work_root.sh
-source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
+source "${REPO_DIR}/scripts/lib_vlm_work_root.sh"
 
 VIDEO_DIR="$HOME/VLM_EatingBehavior/data/segmented_videos"
 METADATA_CSV="$HOME/VLM_EatingBehavior/data/segments_metadata.csv"

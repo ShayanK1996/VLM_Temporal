@@ -59,9 +59,9 @@ DATASET_JSONL="$HOME/VLM_EatingBehavior/qwen_dataset.jsonl"
 
 # Cached .pt + manifest live ONLY under /work/.../VLM_Temporal (see lib_vlm_work_root.sh)
 # Local dev: export VLM_WORK_ROOT=/your/writable/path
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SLURM copies this script to /var/spool/... — use REPO_DIR, not BASH_SOURCE
 # shellcheck source=scripts/lib_vlm_work_root.sh
-source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
+source "${REPO_DIR}/scripts/lib_vlm_work_root.sh"
 OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/cached_features}"
 MODEL_NAME="Qwen/Qwen2.5-VL-3B-Instruct"
 RUN_ID="20260311_171539_A53569"

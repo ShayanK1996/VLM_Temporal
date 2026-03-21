@@ -45,9 +45,9 @@ if [ ! -d "$REPO_DIR/src" ]; then
   fi
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SLURM copies the batch script to /var/spool/... — must not use BASH_SOURCE for lib path
 # shellcheck source=scripts/lib_vlm_work_root.sh
-source "${SCRIPT_DIR}/lib_vlm_work_root.sh"
+source "${REPO_DIR}/scripts/lib_vlm_work_root.sh"
 FEATURE_DIR="${FEATURE_DIR:-${VLM_WORK_ROOT}/cached_features}"
 MANIFEST="${MANIFEST:-$FEATURE_DIR/manifest.json}"
 OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
