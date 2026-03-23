@@ -54,39 +54,36 @@ class SpatialBranchAttention(nn.Module):
         self,
         patch_tokens: torch.Tensor,
         return_attention: bool = False,
-    ) -> torch.Tensor | Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             patch_tokens: (B, num_patches, d_vision) — patches from ONE frame
-            return_attention: if True, also return attention weights for visualization
-            
+            return_attention: if True, also return per-head attention weights
+
         Returns:
-            branch_feature: (B, d_branch) — single vector summarizing this branch's view
-            attn_weights: (B, n_heads, num_patches) — spatial attention map (optional)
+            branch_feature: (B, d_branch)
+            attn_avg: (B, num_patches) — head-averaged pre-dropout attention (for diversity loss)
+            attn_per_head: (B, n_heads, num_patches) — only when return_attention=True
         """
         B, N, _ = patch_tokens.shape
-        
-        # Project patches to key/value
+
         k = self.k_proj(patch_tokens).view(B, N, self.n_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(patch_tokens).view(B, N, self.n_heads, self.head_dim).transpose(1, 2)
-        # k, v: (B, n_heads, N, head_dim)
-        
-        # Expand query: (1, 1, n_heads, head_dim) -> (B, n_heads, 1, head_dim)
         q = self.query.expand(B, -1, -1, -1).transpose(1, 2)
-        
-        # Attention: (B, n_heads, 1, N)
+
         attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
         attn_weights = torch.softmax(attn, dim=-1)
-        attn_weights = self.attn_dropout(attn_weights)
-        
-        # Weighted sum: (B, n_heads, 1, head_dim)
-        out = torch.matmul(attn_weights, v)
+
+        # Pre-dropout, head-averaged attention for diversity regularization
+        attn_avg = attn_weights.mean(dim=1).squeeze(1)  # (B, N)
+
+        out = torch.matmul(self.attn_dropout(attn_weights), v)
         out = out.squeeze(2).reshape(B, -1)  # (B, d_branch)
         out = self.out_proj(out)
-        
+
         if return_attention:
-            return out, attn_weights.squeeze(2)  # (B, n_heads, N)
-        return out
+            return out, attn_avg, attn_weights.squeeze(2)
+        return out, attn_avg
 
 
 class SpatialDecomposition(nn.Module):
@@ -136,72 +133,58 @@ class SpatialDecomposition(nn.Module):
             attn_maps: (B, num_frames, n_branches, n_heads, num_patches) — optional
         """
         B, T, N, D = frame_patches.shape
-        
-        # Flatten batch and time for efficient processing
+
         patches_flat = frame_patches.reshape(B * T, N, D)
         patches_flat = self.input_norm(patches_flat)
-        
+
         branch_outputs = []
+        branch_attn_dists = []
         attn_maps = [] if return_attention else None
-        
+
         for branch in self.branches:
             if return_attention:
-                feat, attn = branch(patches_flat, return_attention=True)
-                branch_outputs.append(feat)
-                attn_maps.append(attn)
+                feat, attn_avg, attn_per_head = branch(patches_flat, return_attention=True)
+                attn_maps.append(attn_per_head)
             else:
-                feat = branch(patches_flat, return_attention=False)
-                branch_outputs.append(feat)
-        
-        # Stack branches: (B*T, n_branches, d_branch)
+                feat, attn_avg = branch(patches_flat)
+            branch_outputs.append(feat)
+            branch_attn_dists.append(attn_avg)
+
         streams = torch.stack(branch_outputs, dim=1)
         streams = streams.reshape(B, T, self.n_branches, self.d_branch)
-        
-        # Diversity loss: encourage branches to attend to different patches
-        diversity_loss = self._compute_diversity_loss(patches_flat)
-        
+
+        diversity_loss = self._compute_diversity_loss(branch_attn_dists)
+
         if return_attention:
-            attn_stack = torch.stack(attn_maps, dim=1)  # (B*T, n_branches, n_heads, N)
+            attn_stack = torch.stack(attn_maps, dim=1)
             attn_stack = attn_stack.reshape(B, T, self.n_branches, -1, N)
             return streams, diversity_loss, attn_stack
-        
+
         return streams, diversity_loss
     
-    def _compute_diversity_loss(self, patches_flat: torch.Tensor) -> torch.Tensor:
+    def _compute_diversity_loss(
+        self, branch_attn_dists: list[torch.Tensor],
+    ) -> torch.Tensor:
         """Encourage branches to attend to different spatial regions.
-        
-        Computes pairwise cosine similarity between branch attention distributions
-        and penalizes high overlap. This pushes branches to specialize.
+
+        Uses the pre-computed (pre-dropout, head-averaged) attention
+        distributions from each branch's forward pass — no redundant
+        recomputation of k_proj / attention.
         """
         if self.diversity_weight == 0.0:
-            return torch.tensor(0.0, device=patches_flat.device)
-        
-        # Get attention distributions from each branch (without dropout)
-        BT, N, D = patches_flat.shape
-        
-        attn_dists = []
-        for branch in self.branches:
-            k = branch.k_proj(patches_flat).view(BT, N, branch.n_heads, branch.head_dim).transpose(1, 2)
-            q = branch.query.expand(BT, -1, -1, -1).transpose(1, 2)
-            attn = torch.matmul(q, k.transpose(-2, -1)) * branch.scale
-            attn = torch.softmax(attn, dim=-1)  # (BT, heads, 1, N)
-            # Average over heads, squeeze
-            attn_avg = attn.mean(dim=1).squeeze(1)  # (BT, N)
-            attn_dists.append(attn_avg)
-        
-        # Stack: (n_branches, BT, N)
-        attn_stack = torch.stack(attn_dists, dim=0)
-        
-        # Pairwise cosine similarity between branches
-        loss = torch.tensor(0.0, device=patches_flat.device)
+            return torch.tensor(0.0, device=branch_attn_dists[0].device)
+
+        attn_stack = torch.stack(branch_attn_dists, dim=0)  # (n_branches, BT, N)
+
+        loss = torch.tensor(0.0, device=attn_stack.device)
         count = 0
         for i in range(self.n_branches):
             for j in range(i + 1, self.n_branches):
                 cos_sim = F.cosine_similarity(attn_stack[i], attn_stack[j], dim=-1)
                 loss = loss + cos_sim.mean()
                 count += 1
-        
+
         if count > 0:
             loss = loss / count
-        
+
         return self.diversity_weight * loss

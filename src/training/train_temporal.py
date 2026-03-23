@@ -48,8 +48,11 @@ def train_one_epoch(
     optimizer,
     device: str,
     grad_clip: float = 1.0,
+    use_amp: bool = False,
+    scaler: torch.cuda.amp.GradScaler | None = None,
+    grad_accum_steps: int = 1,
 ) -> Dict[str, float]:
-    """Train for one epoch."""
+    """Train for one epoch with optional AMP and gradient accumulation."""
     model.train()
     total_loss = 0.0
     total_ce = 0.0
@@ -57,24 +60,42 @@ def train_one_epoch(
     correct = 0
     total = 0
     skipped_non_finite = 0
-    
-    for batch in loader:
+
+    optimizer.zero_grad()
+    num_batches = len(loader)
+
+    for step, batch in enumerate(loader):
         patches = batch["patches"].to(device)   # (B, T, N, D)
         patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         labels = batch["label"].to(device)       # (B,)
-        
-        output = model(patches, labels=labels)
-        loss = output["loss"]
+
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            output = model(patches, labels=labels)
+            loss = output["loss"]
+
         if not torch.isfinite(loss):
             skipped_non_finite += 1
             continue
-        
-        optimizer.zero_grad()
-        loss.backward()
-        if grad_clip > 0:
-            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
-        
+
+        scaled_loss = loss / grad_accum_steps
+        if scaler is not None:
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
+
+        if (step + 1) % grad_accum_steps == 0 or (step + 1) == num_batches:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+                if grad_clip > 0:
+                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                if grad_clip > 0:
+                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                optimizer.step()
+            optimizer.zero_grad()
+
         total_loss += loss.item() * labels.size(0)
         total_ce += output["ce_loss"].item() * labels.size(0)
         total_div += output["diversity_loss"].item() * labels.size(0)
@@ -87,7 +108,7 @@ def train_one_epoch(
             f"All training batches were non-finite (skipped={skipped_non_finite}). "
             "Check cached feature tensors for NaN/Inf or extreme values."
         )
-    
+
     return {
         "loss": total_loss / total,
         "ce_loss": total_ce / total,
@@ -102,24 +123,26 @@ def evaluate(
     model: nn.Module,
     loader,
     device: str,
+    use_amp: bool = False,
 ) -> Dict[str, float]:
     """Evaluate on validation set."""
     model.eval()
     total_loss = 0.0
     correct = 0
     total = 0
-    
+
     all_preds = []
     all_labels = []
     all_food_types = []
     skipped_non_finite = 0
-    
+
     for batch in loader:
         patches = batch["patches"].to(device)
         patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         labels = batch["label"].to(device)
-        
-        output = model(patches, labels=labels)
+
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            output = model(patches, labels=labels)
         if not torch.isfinite(output["loss"]):
             skipped_non_finite += 1
             continue
@@ -188,15 +211,17 @@ def run_fold(
     output_dir: Path,
     device: str,
     num_workers: int = 0,
+    use_amp: bool = False,
+    grad_accum_steps: int = 1,
 ) -> Dict:
     """Train and evaluate one fold."""
     print(f"\n{'='*60}")
     print(f"FOLD {fold_id}")
     print(f"{'='*60}")
-    
+
     fold_dir = output_dir / f"fold_{fold_id}"
     fold_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Data
     train_loader, val_loader, fold_info = get_fold_split(
         manifest_path=manifest_path,
@@ -207,22 +232,25 @@ def run_fold(
         batch_size=config.batch_size,
         num_workers=num_workers,
     )
-    
+
     print(f"  Train: {fold_info['train_size']} samples ({len(fold_info['train_participants'])} participants)")
     print(f"  Val:   {fold_info['val_size']} samples ({len(fold_info['val_participants'])} participants)")
-    
+
     # Peek at one sample to get d_vision
     sample = next(iter(train_loader))
     actual_d_vision = sample["patches"].shape[-1]
     if actual_d_vision != config.d_vision:
         print(f"  NOTE: Adjusting d_vision from {config.d_vision} to {actual_d_vision}")
         config.d_vision = actual_d_vision
-    
+
     # Model
     model = TemporalBehaviorModel(config).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Trainable parameters: {n_params:,}")
-    
+
+    # AMP scaler
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+
     # Optimizer
     optimizer = AdamW(
         model.parameters(),
@@ -234,20 +262,23 @@ def run_fold(
         T_max=config.num_epochs,
         eta_min=1e-6,
     )
-    
+
     # Training loop
     best_val_acc = 0.0
     best_epoch = 0
     history = []
-    
+
     for epoch in range(config.num_epochs):
         t0 = time.time()
-        
+
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, device,
             grad_clip=config.grad_clip,
+            use_amp=use_amp,
+            scaler=scaler,
+            grad_accum_steps=grad_accum_steps,
         )
-        val_metrics = evaluate(model, val_loader, device)
+        val_metrics = evaluate(model, val_loader, device, use_amp=use_amp)
         scheduler.step()
         
         elapsed = time.time() - t0
@@ -341,18 +372,27 @@ def main():
         help="DataLoader workers (default 0 — safest on NFS / Slurm; try 2–4 if local SSD)",
     )
     
+    # Memory / performance
+    parser.add_argument("--amp", action="store_true",
+                        help="Enable automatic mixed precision (float16)")
+    parser.add_argument("--grad-accum-steps", type=int, default=1,
+                        help="Gradient accumulation steps (effective bs = batch_size * accum)")
+
     # General
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42)
-    
+
     args = parser.parse_args()
-    
+
     # Device
     if args.device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
         device = args.device
     print(f"Device: {device}")
+    if args.amp:
+        eff_bs = args.batch_size * args.grad_accum_steps
+        print(f"AMP: enabled | grad_accum: {args.grad_accum_steps} | effective bs: {eff_bs}")
     
     # Seed
     torch.manual_seed(args.seed)
@@ -397,6 +437,8 @@ def main():
             output_dir=output_dir,
             device=device,
             num_workers=args.num_workers,
+            use_amp=args.amp,
+            grad_accum_steps=args.grad_accum_steps,
         )
         all_results.append(result)
     
