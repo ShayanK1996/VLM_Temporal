@@ -81,13 +81,17 @@ class TemporalCNNBranch(nn.Module):
     Adapted from CNNBranch in RF_CNN_Attention_v3.py.
     Key difference: input is d_branch features per frame (not 3-channel IMU).
     
-    Uses coprime dilations [1, 2, 3] across three conv layers.
-    With kernel_size=3 (adjusted for shorter sequences of 16 frames vs 350 IMU samples):
-        Conv1(k=3,d=1) -> Pool(2) -> Conv2(k=3,d=2) -> Conv3(k=3,d=3)
-        RF = covers ~8 frames, capturing multi-bite temporal patterns
+    Uses coprime dilations [1, 2, 3] with kernel_size=7 (same as sensor model).
+    Why kernel=7 makes sense even with only 16 frames:
+        - Dilated conv effective span: d*(k-1)+1
+          → d=1,k=7: 7 frames (half the sequence)
+          → d=2,k=7: 13 frames (most of the sequence)
+          → d=3,k=7: 19 frames (full sequence + context via padding)
+        - This lets each branch see full eating bouts (bite→chew→pause→bite)
+          which typically span 5-10 frames at 1fps
     
-    NOTE: No pooling between conv2 and conv3 to preserve temporal resolution
-    when input is only 16 frames (vs hundreds of IMU samples at 100Hz).
+    No pooling: 16 frames is too short to halve (would give RoPE attention only 8
+    positions, losing temporal resolution for the rhythm we care about).
     """
     
     def __init__(
@@ -95,7 +99,7 @@ class TemporalCNNBranch(nn.Module):
         in_channels: int,       # d_branch from spatial decomposition
         hidden_channels: int = 64,
         out_channels: int = 64,
-        kernel_size: int = 3,   # smaller than sensor model (was 7) due to shorter sequences
+        kernel_size: int = 7,   # same as sensor model — dilations give full temporal RF
         dropout: float = 0.2,
     ):
         super().__init__()
@@ -122,10 +126,8 @@ class TemporalCNNBranch(nn.Module):
         )
         self.bn3 = nn.BatchNorm1d(out_channels)
         
-        # Only one pool (halve once: 16 -> 8), not 3x pool like sensor model
-        # Sensor model pooled 3x because input was ~350 timesteps at 100Hz
-        # We have 16 frames — can't afford to lose more resolution
-        self.pool = nn.MaxPool1d(2)
+        # No pooling: preserve all 16 temporal positions for RoPE attention.
+        # Sensor model pooled because it had ~350 timesteps; we have 16.
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -133,14 +135,14 @@ class TemporalCNNBranch(nn.Module):
         Args:
             x: (B, num_frames, d_branch) — one spatial stream across time
         Returns:
-            (B, num_frames//2, out_channels) — temporally processed features
+            (B, num_frames, out_channels) — temporally processed features, full resolution
         """
         x = x.transpose(1, 2)  # (B, d_branch, T)
-        x = self.pool(torch.relu(self.bn1(self.conv1(x))))   # (B, hidden, T//2)
-        x = torch.relu(self.bn2(self.conv2(x)))               # (B, hidden, T//2) — no pool
-        x = torch.relu(self.bn3(self.conv3(x)))               # (B, out_ch, T//2) — no pool
+        x = torch.relu(self.bn1(self.conv1(x)))   # (B, hidden, T) — no pool
+        x = torch.relu(self.bn2(self.conv2(x)))   # (B, hidden, T)
+        x = torch.relu(self.bn3(self.conv3(x)))   # (B, out_ch, T)
         x = self.dropout(x)
-        return x.transpose(1, 2)  # (B, T//2, out_channels)
+        return x.transpose(1, 2)  # (B, T, out_channels)
 
 
 # =============================================================================

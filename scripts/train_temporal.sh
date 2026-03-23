@@ -63,17 +63,20 @@ MANIFEST="${MANIFEST:-$FEATURE_DIR/manifest.json}"
 OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 
 # --- Hyperparameters ---
-NUM_EPOCHS=30
-BATCH_SIZE="${BATCH_SIZE:-8}"
+# Smaller architecture to match ~1K training samples (reduces overfitting)
+# kernel=7 (no pool): full dilated RF over 16 frames, same as sensor model
+NUM_EPOCHS=20
+BATCH_SIZE="${BATCH_SIZE:-32}"
 NUM_WORKERS="${NUM_WORKERS:-0}"
 LR=1e-3
-D_BRANCH=128
+D_BRANCH=64          # was 128 — halves the spatial projection params
 N_BRANCHES=4
-TEMPORAL_HIDDEN=64
-TEMPORAL_OUT=64
-N_HEADS=4
-N_ATTN_LAYERS=2
+TEMPORAL_HIDDEN=32   # was 64
+TEMPORAL_OUT=32      # was 64
+N_HEADS=2            # was 4
+N_ATTN_LAYERS=1      # was 2
 DIVERSITY_WEIGHT=0.1
+TEMPORAL_KERNEL=7    # was 3 — kernel=7 with dilations [1,2,3] covers full 16-frame sequence
 
 # --- Run single fold for validation/debug ---
 # Default: fold 0 only
@@ -108,7 +111,7 @@ echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
 echo "Features: $FEATURE_DIR"
 echo ""
 echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, workers=$NUM_WORKERS, lr=$LR"
-echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS"
+echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS, kernel=$TEMPORAL_KERNEL"
 echo ""
 
 python -u -m src.training.train_temporal \
@@ -126,6 +129,7 @@ python -u -m src.training.train_temporal \
     --n-heads "$N_HEADS" \
     --n-attn-layers "$N_ATTN_LAYERS" \
     --diversity-weight "$DIVERSITY_WEIGHT" \
+    --temporal-kernel "$TEMPORAL_KERNEL" \
     $FOLD_ARG
 
 echo ""
