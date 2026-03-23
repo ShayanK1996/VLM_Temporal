@@ -64,7 +64,8 @@ OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 
 # --- Hyperparameters ---
 NUM_EPOCHS=30
-BATCH_SIZE=32
+BATCH_SIZE="${BATCH_SIZE:-32}"
+NUM_WORKERS="${NUM_WORKERS:-0}"
 LR=1e-3
 D_BRANCH=128
 N_BRANCHES=4
@@ -106,7 +107,7 @@ echo "Repo: $REPO_DIR"
 echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
 echo "Features: $FEATURE_DIR"
 echo ""
-echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, lr=$LR"
+echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, workers=$NUM_WORKERS, lr=$LR"
 echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS"
 echo ""
 
@@ -116,6 +117,7 @@ python -u -m src.training.train_temporal \
     --output-dir "$OUTPUT_DIR" \
     --num-epochs "$NUM_EPOCHS" \
     --batch-size "$BATCH_SIZE" \
+    --num-workers "$NUM_WORKERS" \
     --lr "$LR" \
     --d-branch "$D_BRANCH" \
     --n-branches "$N_BRANCHES" \
