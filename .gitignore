@@ -1,6 +1,7 @@
 # Data & features (large, don't commit)
 cached_features/
-data/
+# Only the repo-root data/ dir (JSONL, CSVs). Do NOT use plain `data/` — that ignores src/data/ too.
+/data/
 *.pt
 *.pth
 

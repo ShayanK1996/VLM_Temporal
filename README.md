@@ -88,6 +88,14 @@ sbatch scripts/extract_features.sh
 
 On Unity the repo is often `~/VLM_Temporal`; submit from that directory (or set `REPO_DIR`).
 
+### Debugging a FAILED Stage 1 job (`ExitCode 1:0`)
+
+1. **Slurm logs** (same dir you submitted from):  
+   `logs_stage_1/train_temporal_<JOBID>.err` and `.out` — Python tracebacks go to **stderr**.
+2. **Accounting**: `sacct -j <JOBID> -o JobID,State,ExitCode,Reason,Elapsed,MaxRSS`
+3. **`ModuleNotFoundError: No module named 'src.data'`**: Run from repo root with a **full** clone (must include `src/data/`). Batch scripts set **`PYTHONPATH=$REPO_DIR`**; there is a root **`src/__init__.py`** so `python -m src.training.train_temporal` resolves. Re-sync the repo to Unity if `src/data` is missing.
+4. **Recent fixes in-repo**: `nvidia-smi` in the batch script no longer aborts the whole job under `set -e`; full Python tracebacks on crash; `participant_id` str/int normalized in folds; DataLoader default **`--num-workers 0`** (NFS-safe).
+
 ## Repo Structure
 
 ```

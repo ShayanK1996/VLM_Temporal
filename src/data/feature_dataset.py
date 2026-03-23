@@ -207,9 +207,27 @@ def get_fold_split(
 
 def _collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     """Custom collate to handle mixed tensor/string fields."""
+    # Each sample's patches are shaped (T, N_patches, D_vision).
+    # N_patches varies across segments because input frame resolutions differ.
+    # We pad to the maximum N_patches inside the batch so we can stack.
+    patches_list = [b["patches"] for b in batch]
+    labels_list = [b["label"] for b in batch]
+
+    B = len(batch)
+    T = patches_list[0].shape[0]
+    D = patches_list[0].shape[2]
+    max_n = max(p.shape[1] for p in patches_list)
+
+    padded = patches_list[0].new_zeros((B, T, max_n, D))
+    for i, p in enumerate(patches_list):
+        t_i, n_i, d_i = p.shape
+        if d_i != D:
+            raise ValueError(f"Inconsistent d_vision in batch: got {d_i} vs {D}")
+        padded[i, :t_i, :n_i, :] = p
+
     return {
-        "patches": torch.stack([b["patches"] for b in batch]),
-        "label": torch.stack([b["label"] for b in batch]),
+        "patches": padded,  # (B, T, max_n, D)
+        "label": torch.stack(labels_list),
         "participant_id": [b["participant_id"] for b in batch],
         "food_type": [b["food_type"] for b in batch],
         "segment_id": [b["segment_id"] for b in batch],

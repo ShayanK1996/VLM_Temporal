@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -162,6 +163,7 @@ def run_fold(
     feature_dir: str,
     output_dir: Path,
     device: str,
+    num_workers: int = 0,
 ) -> Dict:
     """Train and evaluate one fold."""
     print(f"\n{'='*60}")
@@ -307,6 +309,12 @@ def main():
     parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--fold", type=int, default=None,
                         help="Run specific fold only (default: all folds)")
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers (default 0 — safest on NFS / Slurm; try 2–4 if local SSD)",
+    )
     
     # General
     parser.add_argument("--device", type=str, default="auto")
@@ -363,6 +371,7 @@ def main():
             feature_dir=args.feature_dir,
             output_dir=output_dir,
             device=device,
+            num_workers=args.num_workers,
         )
         all_results.append(result)
     
@@ -402,4 +411,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

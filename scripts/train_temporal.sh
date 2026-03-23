@@ -4,6 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=160G
 #SBATCH --cpus-per-task=8
+# If jobs are rejected or killed for time: try --time=12:00:00 (uri-gpu QOS varies by account)
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs_stage_1/train_temporal_%j.out
 #SBATCH --error=logs_stage_1/train_temporal_%j.err
@@ -12,6 +13,11 @@
 # Stage 1: Train Spatial Decomposition + Temporal Attention
 # Operates on CACHED features — no VLM forward pass needed
 # Can run on L40S 48GB (much cheaper/more available than A100)
+#
+# IMPORTANT: Slurm opens logs_stage_1/*.out BEFORE this script runs.
+# Create the dir first:  mkdir -p logs_stage_1
+# Or use:                ./scripts/submit_train_temporal.sh
+# If the job "vanishes": sacct -j JOBID -o JobID,State,ExitCode,Reason,Elapsed,Timelimit
 # ============================================================
 
 set -euo pipefail
@@ -30,7 +36,11 @@ else
   echo "ERROR: conda not found."
   exit 1
 fi
-conda activate VLM_EatingBehavior
+# conda activate can return non-zero under strict set -e in some batch setups
+if ! conda activate VLM_EatingBehavior; then
+  echo "ERROR: conda activate VLM_EatingBehavior failed."
+  exit 1
+fi
 
 # --- Paths (SLURM-safe repo root; same as extract_features.sh) ---
 REPO_DIR="${REPO_DIR:-${SLURM_SUBMIT_DIR:-$HOME/VLM_Temporal}}"
@@ -71,10 +81,26 @@ FOLD_ARG="--fold 0"
 mkdir -p logs_stage_1 "$OUTPUT_DIR"
 
 cd "$REPO_DIR"
+# Ensure `python -m src....` resolves (some Slurm/env setups omit cwd from sys.path)
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+
+echo "=== Slurm diagnostics ==="
+echo "PYTHONPATH (repo root): ${REPO_DIR}"
+echo "src/data/feature_dataset.py: $([ -f "${REPO_DIR}/src/data/feature_dataset.py" ] && echo OK || echo MISSING)"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-n/a}  SUBMIT_DIR=${SLURM_SUBMIT_DIR:-n/a}"
+echo "Timelimit env: ${SLURM_TIMELIMIT:-n/a}  Partition: ${SLURM_JOB_PARTITION:-n/a}"
+echo "lib_vlm_work_root.sh: $([ -f "${REPO_DIR}/scripts/lib_vlm_work_root.sh" ] && echo OK || echo MISSING)"
+echo "manifest: ${MANIFEST} -> $([ -f "${MANIFEST}" ] && echo OK || echo MISSING)"
+_pt_n=0
+[ -d "${FEATURE_DIR}" ] && _pt_n=$(find "${FEATURE_DIR}" -maxdepth 1 -name "*.pt" 2>/dev/null | wc -l)
+echo "feature dir: ${FEATURE_DIR} (${_pt_n} .pt files)"
+echo "========================="
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
-echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
+# Do not fail the whole job if nvidia-smi hiccups (set -e treats subshell failure as fatal)
+_gpu_info="$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'nvidia-smi failed')"
+echo "GPU: ${_gpu_info}"
 echo "Start: $(date)"
 echo "Repo: $REPO_DIR"
 echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
@@ -84,7 +110,7 @@ echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, lr=$LR"
 echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS"
 echo ""
 
-python -m src.training.train_temporal \
+python -u -m src.training.train_temporal \
     --manifest "$MANIFEST" \
     --feature-dir "$FEATURE_DIR" \
     --output-dir "$OUTPUT_DIR" \

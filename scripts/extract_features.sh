@@ -93,6 +93,7 @@ if [ ! -d "$LORA_DIR" ]; then
 fi
 
 cd "$REPO_DIR"
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p logs "$OUTPUT_DIR"
 
 echo "Job ID: $SLURM_JOB_ID"

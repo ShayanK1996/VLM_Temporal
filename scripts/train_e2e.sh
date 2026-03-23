@@ -55,6 +55,7 @@ FOLD=0
 
 mkdir -p logs "$OUTPUT_DIR"
 cd "$REPO_DIR"
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
