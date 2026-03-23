@@ -56,13 +56,18 @@ def train_one_epoch(
     total_div = 0.0
     correct = 0
     total = 0
+    skipped_non_finite = 0
     
     for batch in loader:
         patches = batch["patches"].to(device)   # (B, T, N, D)
+        patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         labels = batch["label"].to(device)       # (B,)
         
         output = model(patches, labels=labels)
         loss = output["loss"]
+        if not torch.isfinite(loss):
+            skipped_non_finite += 1
+            continue
         
         optimizer.zero_grad()
         loss.backward()
@@ -76,12 +81,19 @@ def train_one_epoch(
         preds = output["logits"].argmax(dim=-1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
+
+    if total == 0:
+        raise RuntimeError(
+            f"All training batches were non-finite (skipped={skipped_non_finite}). "
+            "Check cached feature tensors for NaN/Inf or extreme values."
+        )
     
     return {
         "loss": total_loss / total,
         "ce_loss": total_ce / total,
         "div_loss": total_div / total,
         "accuracy": correct / total,
+        "skipped_non_finite": skipped_non_finite,
     }
 
 
@@ -100,12 +112,17 @@ def evaluate(
     all_preds = []
     all_labels = []
     all_food_types = []
+    skipped_non_finite = 0
     
     for batch in loader:
         patches = batch["patches"].to(device)
+        patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         labels = batch["label"].to(device)
         
         output = model(patches, labels=labels)
+        if not torch.isfinite(output["loss"]):
+            skipped_non_finite += 1
+            continue
         
         total_loss += output["loss"].item() * labels.size(0)
         preds = output["logits"].argmax(dim=-1)
@@ -115,6 +132,12 @@ def evaluate(
         all_preds.extend(preds.cpu().tolist())
         all_labels.extend(labels.cpu().tolist())
         all_food_types.extend(batch["food_type"])
+
+    if total == 0:
+        raise RuntimeError(
+            f"All validation batches were non-finite (skipped={skipped_non_finite}). "
+            "Check cached feature tensors for NaN/Inf or extreme values."
+        )
     
     # Overall metrics
     accuracy = correct / total
@@ -127,6 +150,7 @@ def evaluate(
         "loss": total_loss / total,
         "accuracy": accuracy,
         "n_samples": total,
+        "skipped_non_finite": skipped_non_finite,
     }
     
     # Per-class precision/recall/f1

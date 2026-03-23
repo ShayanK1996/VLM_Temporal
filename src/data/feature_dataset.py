@@ -94,6 +94,9 @@ class CachedFeatureDataset(Dataset):
         
         data = _load_feature_pt(Path(cached_path))
         patches = data["patches"].float()  # (T, N_patches, d_vision)
+        # Guard against rare corrupt cache tensors containing NaN/Inf.
+        # Without this, training loss becomes NaN from the first epoch.
+        patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         label = data["label"]
         
         T, N, D = patches.shape
