@@ -64,7 +64,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 
 # --- Hyperparameters ---
 NUM_EPOCHS=30
-BATCH_SIZE="${BATCH_SIZE:-32}"
+BATCH_SIZE="${BATCH_SIZE:16}"
 NUM_WORKERS="${NUM_WORKERS:-0}"
 LR=1e-3
 D_BRANCH=128
