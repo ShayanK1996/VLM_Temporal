@@ -175,14 +175,15 @@ def get_fold_split(
         max_frames=max_frames,
     )
     
+    pin = num_workers > 0 and torch.cuda.is_available()
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True,
+        num_workers=num_workers, pin_memory=pin,
         collate_fn=_collate_fn,
     )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True,
+        num_workers=num_workers, pin_memory=pin,
         collate_fn=_collate_fn,
     )
     

@@ -205,6 +205,7 @@ def run_fold(
         n_folds=5,
         max_frames=config.num_frames,
         batch_size=config.batch_size,
+        num_workers=num_workers,
     )
     
     print(f"  Train: {fold_info['train_size']} samples ({len(fold_info['train_participants'])} participants)")
@@ -315,17 +316,17 @@ def main():
     
     # Architecture
     parser.add_argument("--d-vision", type=int, default=1536)
-    parser.add_argument("--d-branch", type=int, default=128)
+    parser.add_argument("--d-branch", type=int, default=64)
     parser.add_argument("--n-branches", type=int, default=4)
-    parser.add_argument("--temporal-hidden", type=int, default=64)
-    parser.add_argument("--temporal-out", type=int, default=64)
+    parser.add_argument("--temporal-hidden", type=int, default=32)
+    parser.add_argument("--temporal-out", type=int, default=32)
     parser.add_argument("--temporal-kernel", type=int, default=3)
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--n-attn-layers", type=int, default=2)
     parser.add_argument("--diversity-weight", type=float, default=0.1)
     
     # Training
-    parser.add_argument("--num-epochs", type=int, default=30)
+    parser.add_argument("--num-epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
