@@ -66,7 +66,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 # Smaller architecture to match ~1K training samples (reduces overfitting)
 # kernel=7 (no pool): full dilated RF over 16 frames, same as sensor model
 NUM_EPOCHS=30
-BATCH_SIZE="${BATCH_SIZE:-16}"
+BATCH_SIZE="${BATCH_SIZE:-8}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-2}"  # effective bs = 16*2 = 32
 NUM_WORKERS="${NUM_WORKERS:-0}"
 LR=3e-4              # was 1e-3 — lower LR + warmup prevents early memorization
