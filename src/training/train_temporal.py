@@ -52,6 +52,7 @@ def train_one_epoch(
     scaler: "torch.amp.GradScaler | None" = None,
     grad_accum_steps: int = 1,
     feat_dropout: float = 0.0,
+    class_weight: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
     """Train for one epoch with optional AMP and gradient accumulation."""
     model.train()
@@ -76,7 +77,7 @@ def train_one_epoch(
         labels = batch["label"].to(device)       # (B,)
 
         with torch.amp.autocast("cuda", enabled=use_amp):
-            output = model(patches, labels=labels)
+            output = model(patches, labels=labels, class_weight=class_weight)
             loss = output["loss"]
 
         if not torch.isfinite(loss):
@@ -242,8 +243,15 @@ def run_fold(
         num_workers=num_workers,
     )
 
-    print(f"  Train: {fold_info['train_size']} samples ({len(fold_info['train_participants'])} participants)")
+    class_counts = fold_info["class_counts"]
+    n_train = fold_info["train_size"]
+    class_weight = torch.tensor(
+        [n_train / (len(class_counts) * c) for c in class_counts],
+        dtype=torch.float, device=device,
+    )
+    print(f"  Train: {n_train} samples ({len(fold_info['train_participants'])} participants)")
     print(f"  Val:   {fold_info['val_size']} samples ({len(fold_info['val_participants'])} participants)")
+    print(f"  Class counts: {dict(enumerate(class_counts))} | weights: {class_weight.tolist()}")
 
     # Peek at one sample to get d_vision
     sample = next(iter(train_loader))
@@ -280,8 +288,8 @@ def run_fold(
         milestones=[warmup_epochs],
     )
 
-    # Training loop
-    best_val_acc = 0.0
+    # Training loop — track macro-F1 as primary metric (robust to imbalance)
+    best_macro_f1 = 0.0
     best_epoch = 0
     history = []
     epochs_no_improve = 0
@@ -296,6 +304,7 @@ def run_fold(
             scaler=scaler,
             grad_accum_steps=grad_accum_steps,
             feat_dropout=feat_dropout,
+            class_weight=class_weight,
         )
         val_metrics = evaluate(model, val_loader, device, use_amp=use_amp)
         scheduler.step()
@@ -312,19 +321,22 @@ def run_fold(
         history.append(epoch_record)
         
         lr_now = optimizer.param_groups[0]["lr"]
+        ni_f1 = val_metrics["needs_improvement_f1"]
+        g_f1 = val_metrics["good_f1"]
+        macro_f1 = (ni_f1 + g_f1) / 2.0
 
         # Logging
         print(
             f"  Epoch {epoch:3d} | "
             f"train_loss={train_metrics['loss']:.4f} train_acc={train_metrics['accuracy']:.3f} | "
             f"val_loss={val_metrics['loss']:.4f} val_acc={val_metrics['accuracy']:.3f} | "
-            f"NI_f1={val_metrics['needs_improvement_f1']:.3f} G_f1={val_metrics['good_f1']:.3f} | "
+            f"NI_f1={ni_f1:.3f} G_f1={g_f1:.3f} macro_f1={macro_f1:.3f} | "
             f"lr={lr_now:.2e} | {elapsed:.1f}s"
         )
 
-        # Save best / early stopping
-        if val_metrics["accuracy"] > best_val_acc:
-            best_val_acc = val_metrics["accuracy"]
+        # Save best / early stopping — use macro-F1, not accuracy
+        if macro_f1 > best_macro_f1:
+            best_macro_f1 = macro_f1
             best_epoch = epoch
             epochs_no_improve = 0
             torch.save({
@@ -337,7 +349,7 @@ def run_fold(
         else:
             epochs_no_improve += 1
             if early_stop_patience > 0 and epochs_no_improve >= early_stop_patience:
-                print(f"  Early stopping at epoch {epoch} (no improvement for {early_stop_patience} epochs)")
+                print(f"  Early stopping at epoch {epoch} (macro_f1 no improvement for {early_stop_patience} epochs)")
                 break
 
     # Save training history
@@ -352,15 +364,16 @@ def run_fold(
     fold_result = {
         "fold_id": fold_id,
         "best_epoch": best_epoch,
-        "best_val_accuracy": best_val_acc,
+        "best_macro_f1": best_macro_f1,
+        "best_val_accuracy": final_metrics["accuracy"],
         "final_metrics": final_metrics,
         "fold_info": fold_info,
     }
-    
+
     with open(fold_dir / "fold_result.json", "w") as f:
         json.dump(fold_result, f, indent=2, default=str)
-    
-    print(f"  Best: epoch {best_epoch}, val_acc={best_val_acc:.3f}")
+
+    print(f"  Best: epoch {best_epoch}, macro_f1={best_macro_f1:.3f}, val_acc={final_metrics['accuracy']:.3f}")
     return fold_result
 
 
@@ -482,12 +495,14 @@ def main():
     # Summary across folds
     if len(all_results) > 1:
         accs = [r["best_val_accuracy"] for r in all_results]
+        macro_f1s = [r["best_macro_f1"] for r in all_results]
         print(f"\n{'='*60}")
         print(f"CROSS-VALIDATION SUMMARY ({len(all_results)} folds)")
         print(f"{'='*60}")
-        print(f"  Accuracy: {np.mean(accs):.3f} ± {np.std(accs):.3f}")
-        print(f"  Per-fold: {[f'{a:.3f}' for a in accs]}")
-        
+        print(f"  Macro-F1:  {np.mean(macro_f1s):.3f} ± {np.std(macro_f1s):.3f}")
+        print(f"  Accuracy:  {np.mean(accs):.3f} ± {np.std(accs):.3f}")
+        print(f"  Per-fold macro-F1: {[f'{v:.3f}' for v in macro_f1s]}")
+
         # Per-food-type summary
         food_accs = {}
         for r in all_results:
@@ -495,14 +510,17 @@ def main():
                 if key.startswith("acc_"):
                     food = key[4:]
                     food_accs.setdefault(food, []).append(val)
-        
+
         if food_accs:
             print(f"\n  Per-food-type accuracy:")
             for food, vals in sorted(food_accs.items()):
                 print(f"    {food}: {np.mean(vals):.3f} ± {np.std(vals):.3f}")
-        
+
         # Save summary
         summary = {
+            "mean_macro_f1": float(np.mean(macro_f1s)),
+            "std_macro_f1": float(np.std(macro_f1s)),
+            "per_fold_macro_f1": macro_f1s,
             "mean_accuracy": float(np.mean(accs)),
             "std_accuracy": float(np.std(accs)),
             "per_fold_accuracy": accs,

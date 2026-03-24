@@ -11,25 +11,65 @@ CVPR 2027 main track (with distillation + Study 1b data).
 - Majority class: 54.3%
 - Per-food: chips 72.6%, carrots 63.8%, rice+beans 53.6%, churros 52.0%
 
+---
+
+## Bug & Fix Log
+
+### BUG-001: Stale cluster copy (jobs ran old config)
+- **Symptom**: Job 53826355 printed `epochs=30, bs=8, d_branch=128, heads=4, layers=2` — values that didn't match the local repo.
+- **Cause**: The HPC cluster at `~/VLM_Temporal` had not been synced with the local `VLM_TemporalBranch` repo. Jobs submitted from the cluster always ran the old script.
+- **Fix**: Push local changes to GitHub and `git pull` on the cluster before every submission.
+
+### BUG-002: DataLoader workers OOM-killed (RAM)
+- **Symptom**: Job 53826378 — `RuntimeError: DataLoader worker (pid 221909) exited unexpectedly` + Slurm `oom_kill` event. Crashed before training started.
+- **Cause**: `--num-workers 0` was passed to `main()` → `run_fold(num_workers=0)` → but `run_fold` never forwarded `num_workers` to `get_fold_split()`. The function fell back to its default of `num_workers=4`, spawning 4 worker processes. Each process loaded massive `(16, N_patches, 1280)` feature tensors from NFS in parallel, exhausting the 160 GB RAM allocation.
+- **Fix** (`src/training/train_temporal.py`): Added `num_workers=num_workers` to the `get_fold_split()` call inside `run_fold`.
+- **Fix** (`src/data/feature_dataset.py`): `pin_memory` now only `True` when `num_workers > 0` and CUDA is available (no benefit otherwise).
+
+### BUG-003: CUDA OOM during backward (GPU VRAM)
+- **Symptom**: Job 53826776 — `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 26.28 GiB`. Crashed during `loss.backward()` on first epoch. GPU had 69.47 GiB already allocated.
+- **Cause**: `_compute_diversity_loss` in `SpatialDecomposition` re-ran `k_proj` and full attention for all 4 branches *again* on the flattened `(BT=512, N_patches, 1280)` tensor — i.e., the computation graph was built twice, doubling stored activations. `bs=32` × `T=16` = 512 frame-batches × `N_patches×1280` float32 filled the GPU before the model even started.
+- **Fix** (`src/models/spatial_decomposition.py`): `SpatialBranchAttention.forward()` now returns the pre-dropout head-averaged attention distribution alongside the branch feature. `_compute_diversity_loss` uses these cached values — no redundant second pass.
+- **Fix** (`src/training/train_temporal.py`): Added AMP (`torch.amp.autocast("cuda")` + `GradScaler`) — activations computed in float16, halving VRAM usage.
+- **Fix** (`scripts/train_temporal.sh`): Reduced per-step batch from 32 → 8 (with `GRAD_ACCUM_STEPS=4` to keep effective batch = 32). Also fixed deprecated `torch.cuda.amp.*` API → `torch.amp.*`.
+
+### BUG-004: Model overtrained by epoch 8, wasted compute (overfitting)
+- **Symptom**: Job 53827575 — model peaked at `val_acc=0.741` at epoch 8, then degraded to 0.659 by epoch 19. `train_acc` went from 53% to 96% while val stayed flat.
+- **Cause**: LR=1e-3 was too aggressive (epoch 1 val_acc dropped from 0.637 to 0.541 due to large initial update). No mechanism to stop at the best epoch. No input regularization.
+- **Fix** (`src/training/train_temporal.py`): Added early stopping with configurable patience (`--early-stop-patience`). Added `feat_dropout` (random patch zeroing during training). Added LR warmup (10% of epochs, linear ramp) + cosine decay. Added `--grad-accum-steps` CLI arg.
+- **Fix** (`src/models/vlm_temporal_model.py`): Added `label_smoothing` to CE loss (`F.cross_entropy(..., label_smoothing=0.1)`).
+- **Fix** (`scripts/train_temporal.sh`): LR 1e-3 → 3e-4, `EARLY_STOP_PATIENCE=7`, `FEAT_DROPOUT=0.1`, `LABEL_SMOOTHING=0.1`.
+- **Result**: Job 53849283 stopped at epoch 14 (early stopping triggered). Best epoch 7, `val_acc=0.710`, `macro_f1=0.667`.
+
+### BUG-005: Class imbalance — model predicts majority class (NI) almost exclusively
+- **Symptom**: Job 53849283 epoch 0 — `val_acc=0.631, NI_f1=0.774, G_f1=0.000`. The model started by predicting *everything* as "needs improvement". Majority class baseline = 63.1%. Best result was only 71.0% accuracy = **+8% above guessing**. G_f1 oscillated wildly (0 → 0.557 → 0 → 0.557) between epochs because small batches (bs=8) sometimes contained zero "good" samples.
+- **Cause**: Training set is ~63% "needs improvement" / ~37% "good". With bs=8 and plain shuffle, many batches were entirely or mostly NI. The model learned to predict NI for everything and was rewarded by accuracy-based model selection.
+- **Fix** (`src/data/feature_dataset.py`): Added `WeightedRandomSampler` (default on) — every training batch now draws ~50% NI / 50% "good" samples.
+- **Fix** (`src/models/vlm_temporal_model.py`): `forward()` now accepts `class_weight` tensor. Loss computed as `F.cross_entropy(..., weight=class_weight)`.
+- **Fix** (`src/training/train_temporal.py`): `run_fold` computes inverse-frequency class weights from training labels and passes them to `train_one_epoch`. Model selection switched from `val_acc` to **macro-F1** (`(NI_f1 + G_f1) / 2`) — accuracy is misleading when classes are imbalanced.
+- **Fix** (`scripts/train_temporal.sh`): `BATCH_SIZE` raised 8 → 16, `GRAD_ACCUM_STEPS` 4 → 2 (same effective batch of 32, but fewer accumulation steps per epoch → faster training; safe because VRAM fixes from BUG-003 are in place).
+
+---
+
 ## Experiment Index
 
-| Run ID | Date | Description | Accuracy | Notes |
-|--------|------|-------------|----------|-------|
-| — | — | (no experiments yet) | — | — |
+| Run ID | Job ID | Date | Config | Val Acc | Macro-F1 | Notes |
+|--------|--------|------|--------|---------|----------|-------|
+| EXP-001 | 53826355 | 2026-03-23 | Old cluster copy: epochs=30, bs=8, d_branch=128, heads=4 | — | — | Cancelled — old config |
+| EXP-002 | 53826378 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix) | — | — | Crashed — DataLoader OOM |
+| EXP-003 | 53826776 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix applied) | — | — | Crashed — CUDA OOM during backward |
+| EXP-004 | 53827575 | 2026-03-23 | epochs=20, bs=8, accum=4, lr=1e-3, AMP (BUG-003 fixes) | 0.741 (ep8) | ~0.699 | Overfit; ran all 20 epochs |
+| EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, AMP, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable — class imbalance not yet addressed |
+| EXP-006 | — | — | +WeightedSampler, class-weighted loss, macro-F1 selection, bs=16, accum=2 | TBD | TBD | Class imbalance fixes |
 
-## Run Log
-
-### EXP-001: [PENDING] Feature extraction
-- **Status**: Not started
-- **Goal**: Cache per-frame patch tokens from Qwen2.5-VL for all 4,223 segments
-- **Script**: `scripts/extract_features.sh`
-- **Expected output**: `cached_features/` with ~4,223 .pt files + manifest.json
-- **Notes**: Run on A100 node. Should take ~2-4 hours.
-
-### EXP-002: [PENDING] Temporal module baseline (all defaults)
-- **Status**: Not started  
-- **Goal**: First training run with default hyperparameters
-- **Script**: `scripts/train_temporal.sh`
-- **Config**: d_branch=128, n_branches=4, temporal_hidden=64, kernel=3, heads=4, layers=2
-- **Expected**: If > 63.2%, temporal module adds value. If < 63.2%, need tuning.
-- **Notes**: Run on L40S. Should take ~1-2 hours for all 5 folds.
+## Current Config (scripts/train_temporal.sh)
+```
+NUM_EPOCHS=30            BATCH_SIZE=16
+GRAD_ACCUM_STEPS=2       # effective bs = 32
+LR=3e-4                  D_BRANCH=64
+N_BRANCHES=4             TEMPORAL_HIDDEN=32
+TEMPORAL_OUT=32          N_HEADS=2
+N_ATTN_LAYERS=1          TEMPORAL_KERNEL=7
+AMP=1                    LABEL_SMOOTHING=0.1
+EARLY_STOP_PATIENCE=7    FEAT_DROPOUT=0.1
+```

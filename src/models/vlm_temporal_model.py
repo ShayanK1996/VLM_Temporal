@@ -179,6 +179,7 @@ class TemporalBehaviorModel(nn.Module):
         frame_patches: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
         return_attention: bool = False,
+        class_weight: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Args:
@@ -214,7 +215,11 @@ class TemporalBehaviorModel(nn.Module):
         }
         
         if labels is not None:
-            ce_loss = F.cross_entropy(logits, labels, label_smoothing=self.config.label_smoothing)
+            ce_loss = F.cross_entropy(
+                logits, labels,
+                weight=class_weight,
+                label_smoothing=self.config.label_smoothing,
+            )
             output['ce_loss'] = ce_loss
             output['loss'] = ce_loss + div_loss
         

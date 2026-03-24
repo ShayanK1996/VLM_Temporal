@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 
 
 def _norm_pid(x) -> str:
@@ -127,6 +127,7 @@ def get_fold_split(
     max_frames: int = 16,
     batch_size: int = 32,
     num_workers: int = 4,
+    balanced_sampling: bool = True,
 ) -> Tuple[DataLoader, DataLoader, Dict]:
     """Create train/val dataloaders for a specific fold.
     
@@ -176,11 +177,28 @@ def get_fold_split(
     )
     
     pin = num_workers > 0 and torch.cuda.is_available()
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=pin,
-        collate_fn=_collate_fn,
-    )
+
+    if balanced_sampling:
+        labels = train_ds.labels
+        n_classes = max(labels) + 1
+        class_counts = [labels.count(c) for c in range(n_classes)]
+        sample_weights = [1.0 / class_counts[label] for label in labels]
+        sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(train_ds),
+            replacement=True,
+        )
+        train_loader = DataLoader(
+            train_ds, batch_size=batch_size, sampler=sampler,
+            num_workers=num_workers, pin_memory=pin,
+            collate_fn=_collate_fn,
+        )
+    else:
+        train_loader = DataLoader(
+            train_ds, batch_size=batch_size, shuffle=True,
+            num_workers=num_workers, pin_memory=pin,
+            collate_fn=_collate_fn,
+        )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=pin,
@@ -198,14 +216,18 @@ def get_fold_split(
             f"No validation samples for fold {fold_id}. Check manifest fold assignments."
         )
     
+    train_labels = train_ds.labels
+    n_classes = max(train_labels) + 1
+    class_counts = [train_labels.count(c) for c in range(n_classes)]
     fold_info = {
         "fold_id": fold_id,
         "train_participants": train_pids,
         "val_participants": val_pids,
         "train_size": len(train_ds),
         "val_size": len(val_ds),
+        "class_counts": class_counts,
     }
-    
+
     return train_loader, val_loader, fold_info
 
 
