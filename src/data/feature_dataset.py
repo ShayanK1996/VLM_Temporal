@@ -128,6 +128,7 @@ def get_fold_split(
     batch_size: int = 32,
     num_workers: int = 4,
     balanced_sampling: bool = True,
+    imbalance_ratio_threshold: float = 1.25,
 ) -> Tuple[DataLoader, DataLoader, Dict]:
     """Create train/val dataloaders for a specific fold.
     
@@ -175,14 +176,33 @@ def get_fold_split(
         participant_ids=val_pids,
         max_frames=max_frames,
     )
-    
-    pin = num_workers > 0 and torch.cuda.is_available()
 
-    if balanced_sampling:
-        labels = train_ds.labels
-        n_classes = max(labels) + 1
-        class_counts = [labels.count(c) for c in range(n_classes)]
-        sample_weights = [1.0 / class_counts[label] for label in labels]
+    if len(train_ds) == 0:
+        raise ValueError(
+            f"No training samples for fold {fold_id}. "
+            "Check manifest has 'participant_id' and 'fold' fields, and that this fold has val participants "
+            "while others are assigned to train."
+        )
+    if len(val_ds) == 0:
+        raise ValueError(
+            f"No validation samples for fold {fold_id}. Check manifest fold assignments."
+        )
+
+    train_labels = train_ds.labels
+    n_train_classes = max(train_labels) + 1
+    train_class_counts = [train_labels.count(c) for c in range(n_train_classes)]
+    train_min = max(1, min(train_class_counts))
+    train_imbalance_ratio = max(train_class_counts) / train_min
+
+    val_labels = val_ds.labels
+    n_val_classes = max(val_labels) + 1
+    val_class_counts = [val_labels.count(c) for c in range(n_val_classes)]
+
+    pin = num_workers > 0 and torch.cuda.is_available()
+    use_balanced_sampler = balanced_sampling and (train_imbalance_ratio >= imbalance_ratio_threshold)
+
+    if use_balanced_sampler:
+        sample_weights = [1.0 / train_class_counts[label] for label in train_labels]
         sampler = WeightedRandomSampler(
             weights=sample_weights,
             num_samples=len(train_ds),
@@ -199,33 +219,23 @@ def get_fold_split(
             num_workers=num_workers, pin_memory=pin,
             collate_fn=_collate_fn,
         )
+
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=pin,
         collate_fn=_collate_fn,
     )
-    
-    if len(train_ds) == 0:
-        raise ValueError(
-            f"No training samples for fold {fold_id}. "
-            "Check manifest has 'participant_id' and 'fold' fields, and that this fold has val participants "
-            "while others are assigned to train."
-        )
-    if len(val_ds) == 0:
-        raise ValueError(
-            f"No validation samples for fold {fold_id}. Check manifest fold assignments."
-        )
-    
-    train_labels = train_ds.labels
-    n_classes = max(train_labels) + 1
-    class_counts = [train_labels.count(c) for c in range(n_classes)]
+
     fold_info = {
         "fold_id": fold_id,
         "train_participants": train_pids,
         "val_participants": val_pids,
         "train_size": len(train_ds),
         "val_size": len(val_ds),
-        "class_counts": class_counts,
+        "class_counts": train_class_counts,
+        "val_class_counts": val_class_counts,
+        "train_imbalance_ratio": train_imbalance_ratio,
+        "balanced_sampler_used": use_balanced_sampler,
     }
 
     return train_loader, val_loader, fold_info

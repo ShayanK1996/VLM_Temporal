@@ -43,11 +43,11 @@ CVPR 2027 main track (with distillation + Study 1b data).
 
 ### BUG-005: Class imbalance — model predicts majority class (NI) almost exclusively
 - **Symptom**: Job 53849283 epoch 0 — `val_acc=0.631, NI_f1=0.774, G_f1=0.000`. The model started by predicting *everything* as "needs improvement". Majority class baseline = 63.1%. Best result was only 71.0% accuracy = **+8% above guessing**. G_f1 oscillated wildly (0 → 0.557 → 0 → 0.557) between epochs because small batches (bs=8) sometimes contained zero "good" samples.
-- **Cause**: Training set is ~63% "needs improvement" / ~37% "good". With bs=8 and plain shuffle, many batches were entirely or mostly NI. The model learned to predict NI for everything and was rewarded by accuracy-based model selection.
-- **Fix** (`src/data/feature_dataset.py`): Added `WeightedRandomSampler` (default on) — every training batch now draws ~50% NI / 50% "good" samples.
+- **Cause (updated after job 53851545 instrumentation)**: Train split for fold 0 is actually near-balanced (`561 vs 516`). The stronger skew appears in the **validation split** (participant-level split with only 6 val participants), so fold-level metrics can swing heavily. Enabling weighted sampling on a near-balanced train split can also add noise due to replacement sampling.
+- **Fix** (`src/data/feature_dataset.py`): Weighted sampling is now **conditional** (auto only when train imbalance ratio exceeds threshold; default 1.25). Train/val class counts and the sampler decision are logged each run.
 - **Fix** (`src/models/vlm_temporal_model.py`): `forward()` now accepts `class_weight` tensor. Loss computed as `F.cross_entropy(..., weight=class_weight)`.
-- **Fix** (`src/training/train_temporal.py`): `run_fold` computes inverse-frequency class weights from training labels and passes them to `train_one_epoch`. Model selection switched from `val_acc` to **macro-F1** (`(NI_f1 + G_f1) / 2`) — accuracy is misleading when classes are imbalanced.
-- **Fix** (`scripts/train_temporal.sh`): `BATCH_SIZE` raised 8 → 16, `GRAD_ACCUM_STEPS` 4 → 2 (same effective batch of 32, but fewer accumulation steps per epoch → faster training; safe because VRAM fixes from BUG-003 are in place).
+- **Fix** (`src/training/train_temporal.py`): `run_fold` computes inverse-frequency class weights from training labels **only when imbalance is meaningful** (same threshold). Model selection switched from `val_acc` to **macro-F1** (`(NI_f1 + G_f1) / 2`) — accuracy is misleading when folds are skewed.
+- **Fix** (`scripts/train_temporal.sh`): Model simplified further (`d_branch=32`, `temporal_hidden/out=16`, `n_heads=1`), LR lowered (`2e-4`), stronger regularization (`feat_dropout=0.15`), and faster stopping (`patience=5`).
 
 ---
 
@@ -60,16 +60,18 @@ CVPR 2027 main track (with distillation + Study 1b data).
 | EXP-003 | 53826776 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix applied) | — | — | Crashed — CUDA OOM during backward |
 | EXP-004 | 53827575 | 2026-03-23 | epochs=20, bs=8, accum=4, lr=1e-3, AMP (BUG-003 fixes) | 0.741 (ep8) | ~0.699 | Overfit; ran all 20 epochs |
 | EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, AMP, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable — class imbalance not yet addressed |
-| EXP-006 | — | — | +WeightedSampler, class-weighted loss, macro-F1 selection, bs=16, accum=2 | TBD | TBD | Class imbalance fixes |
+| EXP-006 | 53851545 | 2026-03-24 | +WeightedSampler/class-weighting/macro-F1, bs=8 accum=2 | in-progress | in-progress | Instrumented split counts: train nearly balanced (561/516) |
+| EXP-007 | — | — | Smaller model + conditional balancing + bs=16 accum=2 | TBD | TBD | Next run |
 
 ## Current Config (scripts/train_temporal.sh)
 ```
-NUM_EPOCHS=30            BATCH_SIZE=16
-GRAD_ACCUM_STEPS=2       # effective bs = 32
-LR=3e-4                  D_BRANCH=64
-N_BRANCHES=4             TEMPORAL_HIDDEN=32
-TEMPORAL_OUT=32          N_HEADS=2
+NUM_EPOCHS=20            BATCH_SIZE=8
+GRAD_ACCUM_STEPS=2       # effective bs = 16
+LR=2e-4                  D_BRANCH=32
+N_BRANCHES=4             TEMPORAL_HIDDEN=16
+TEMPORAL_OUT=16          N_HEADS=1
 N_ATTN_LAYERS=1          TEMPORAL_KERNEL=7
 AMP=1                    LABEL_SMOOTHING=0.1
-EARLY_STOP_PATIENCE=7    FEAT_DROPOUT=0.1
+EARLY_STOP_PATIENCE=5    FEAT_DROPOUT=0.15
+BALANCED_SAMPLING=1      IMBALANCE_RATIO_THRESHOLD=1.25
 ```

@@ -65,21 +65,23 @@ OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 # --- Hyperparameters ---
 # Smaller architecture to match ~1K training samples (reduces overfitting)
 # kernel=7 (no pool): full dilated RF over 16 frames, same as sensor model
-NUM_EPOCHS=30
+NUM_EPOCHS=20
 BATCH_SIZE="${BATCH_SIZE:-8}"
-GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-2}"  # effective bs = 16*2 = 32
+GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-2}"  # effective bs = 8*2 = 16
 NUM_WORKERS="${NUM_WORKERS:-0}"
-LR=3e-4              # was 1e-3 — lower LR + warmup prevents early memorization
+LR=2e-4              # lower LR to reduce early memorization
 LABEL_SMOOTHING=0.1  # regularizes CE loss; prevents overconfident predictions
-EARLY_STOP_PATIENCE=7  # stop if val_acc stagnates for 7 epochs
-FEAT_DROPOUT=0.1     # randomly zero 10% of patches per frame during training
-D_BRANCH=64          # was 128 — halves the spatial projection params
+EARLY_STOP_PATIENCE=5  # stop quickly once overfitting starts
+FEAT_DROPOUT=0.15    # stronger feature-level regularization
+BALANCED_SAMPLING=1  # auto-applies only when split is imbalanced
+IMBALANCE_RATIO_THRESHOLD=1.25
+D_BRANCH=32          # simplify model capacity further
 N_BRANCHES=4
-TEMPORAL_HIDDEN=32   # was 64
-TEMPORAL_OUT=32      # was 64
-N_HEADS=2            # was 4
+TEMPORAL_HIDDEN=16
+TEMPORAL_OUT=16
+N_HEADS=1
 N_ATTN_LAYERS=1      # was 2
-DIVERSITY_WEIGHT=0.1
+DIVERSITY_WEIGHT=0.05
 TEMPORAL_KERNEL=7    # was 3 — kernel=7 with dilations [1,2,3] covers full 16-frame sequence
 AMP=1                # mixed precision — halves activation memory
 
@@ -116,12 +118,14 @@ echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
 echo "Features: $FEATURE_DIR"
 echo ""
 echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, accum=$GRAD_ACCUM_STEPS (eff=$((BATCH_SIZE*GRAD_ACCUM_STEPS))), workers=$NUM_WORKERS, lr=$LR, amp=$AMP"
-echo "Regularization: label_smooth=$LABEL_SMOOTHING, early_stop=$EARLY_STOP_PATIENCE, feat_dropout=$FEAT_DROPOUT"
+echo "Regularization: label_smooth=$LABEL_SMOOTHING, early_stop=$EARLY_STOP_PATIENCE, feat_dropout=$FEAT_DROPOUT, balanced=$BALANCED_SAMPLING, ratio_thr=$IMBALANCE_RATIO_THRESHOLD"
 echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS, kernel=$TEMPORAL_KERNEL"
 echo ""
 
 AMP_FLAG=""
 [ "$AMP" = "1" ] && AMP_FLAG="--amp"
+BALANCE_FLAG=""
+[ "$BALANCED_SAMPLING" = "1" ] && BALANCE_FLAG="--balanced-sampling" || BALANCE_FLAG="--no-balanced-sampling"
 
 python -u -m src.training.train_temporal \
     --manifest "$MANIFEST" \
@@ -135,6 +139,7 @@ python -u -m src.training.train_temporal \
     --label-smoothing "$LABEL_SMOOTHING" \
     --early-stop-patience "$EARLY_STOP_PATIENCE" \
     --feat-dropout "$FEAT_DROPOUT" \
+    --imbalance-ratio-threshold "$IMBALANCE_RATIO_THRESHOLD" \
     --d-branch "$D_BRANCH" \
     --n-branches "$N_BRANCHES" \
     --temporal-hidden "$TEMPORAL_HIDDEN" \
@@ -143,6 +148,7 @@ python -u -m src.training.train_temporal \
     --n-attn-layers "$N_ATTN_LAYERS" \
     --diversity-weight "$DIVERSITY_WEIGHT" \
     --temporal-kernel "$TEMPORAL_KERNEL" \
+    $BALANCE_FLAG \
     $AMP_FLAG \
     $FOLD_ARG
 

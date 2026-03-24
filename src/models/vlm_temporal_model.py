@@ -37,31 +37,31 @@ class TemporalModelConfig:
     num_frames: int = 16
     
     # Spatial decomposition
-    d_branch: int = 64            # feature dim per spatial stream
+    d_branch: int = 32            # feature dim per spatial stream
     n_branches: int = 4           # number of spatial streams
     n_heads_spatial: int = 4      # attention heads per branch query
-    diversity_weight: float = 0.1 # branch specialization loss weight
+    diversity_weight: float = 0.05 # branch specialization loss weight
     
     # Temporal processing
-    temporal_hidden: int = 32
-    temporal_out: int = 32
+    temporal_hidden: int = 16
+    temporal_out: int = 16
     temporal_kernel: int = 7   # kernel=7 with dilations [1,2,3] covers full 16-frame RF
     cnn_dropout: float = 0.2
-    n_heads_temporal: int = 4
-    n_attn_layers: int = 2
+    n_heads_temporal: int = 1
+    n_attn_layers: int = 1
     attn_dropout: float = 0.2
     
     # Classifier
-    mlp_hidden: int = 128
+    mlp_hidden: int = 64
     mlp_dropout: float = 0.3
     num_classes: int = 2
     
     # Training
-    learning_rate: float = 3e-4
+    learning_rate: float = 2e-4
     weight_decay: float = 1e-4
     warmup_ratio: float = 0.1
     num_epochs: int = 20
-    batch_size: int = 32
+    batch_size: int = 8
     grad_clip: float = 1.0
     label_smoothing: float = 0.1
     

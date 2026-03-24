@@ -222,7 +222,8 @@ def run_fold(
     grad_accum_steps: int = 1,
     early_stop_patience: int = 0,
     feat_dropout: float = 0.0,
-    label_smoothing: float = 0.0,
+    balanced_sampling: bool = True,
+    imbalance_ratio_threshold: float = 1.25,
 ) -> Dict:
     """Train and evaluate one fold."""
     print(f"\n{'='*60}")
@@ -241,17 +242,34 @@ def run_fold(
         max_frames=config.num_frames,
         batch_size=config.batch_size,
         num_workers=num_workers,
+        balanced_sampling=balanced_sampling,
+        imbalance_ratio_threshold=imbalance_ratio_threshold,
     )
 
     class_counts = fold_info["class_counts"]
+    val_class_counts = fold_info["val_class_counts"]
     n_train = fold_info["train_size"]
-    class_weight = torch.tensor(
-        [n_train / (len(class_counts) * c) for c in class_counts],
-        dtype=torch.float, device=device,
-    )
+    train_imbalance_ratio = fold_info["train_imbalance_ratio"]
+    use_class_weight = train_imbalance_ratio >= imbalance_ratio_threshold
+    class_weight = None
+    if use_class_weight:
+        class_weight = torch.tensor(
+            [n_train / (len(class_counts) * c) for c in class_counts],
+            dtype=torch.float, device=device,
+        )
     print(f"  Train: {n_train} samples ({len(fold_info['train_participants'])} participants)")
     print(f"  Val:   {fold_info['val_size']} samples ({len(fold_info['val_participants'])} participants)")
-    print(f"  Class counts: {dict(enumerate(class_counts))} | weights: {class_weight.tolist()}")
+    print(
+        f"  Train class counts: {dict(enumerate(class_counts))} | "
+        f"val class counts: {dict(enumerate(val_class_counts))}"
+    )
+    print(
+        f"  Train imbalance ratio: {train_imbalance_ratio:.2f} | "
+        f"balanced_sampler={fold_info['balanced_sampler_used']} | "
+        f"class_weighting={use_class_weight}"
+    )
+    if class_weight is not None:
+        print(f"  Class weights: {class_weight.tolist()}")
 
     # Peek at one sample to get d_vision
     sample = next(iter(train_loader))
@@ -387,27 +405,39 @@ def main():
     
     # Architecture
     parser.add_argument("--d-vision", type=int, default=1536)
-    parser.add_argument("--d-branch", type=int, default=64)
+    parser.add_argument("--d-branch", type=int, default=32)
     parser.add_argument("--n-branches", type=int, default=4)
-    parser.add_argument("--temporal-hidden", type=int, default=32)
-    parser.add_argument("--temporal-out", type=int, default=32)
-    parser.add_argument("--temporal-kernel", type=int, default=3)
-    parser.add_argument("--n-heads", type=int, default=4)
-    parser.add_argument("--n-attn-layers", type=int, default=2)
-    parser.add_argument("--diversity-weight", type=float, default=0.1)
+    parser.add_argument("--temporal-hidden", type=int, default=16)
+    parser.add_argument("--temporal-out", type=int, default=16)
+    parser.add_argument("--temporal-kernel", type=int, default=7)
+    parser.add_argument("--n-heads", type=int, default=1)
+    parser.add_argument("--n-attn-layers", type=int, default=1)
+    parser.add_argument("--diversity-weight", type=float, default=0.05)
     
     # Training
-    parser.add_argument("--num-epochs", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--num-epochs", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--label-smoothing", type=float, default=0.1,
                         help="Label smoothing for CE loss (0=off, 0.1=recommended)")
-    parser.add_argument("--early-stop-patience", type=int, default=7,
+    parser.add_argument("--early-stop-patience", type=int, default=5,
                         help="Stop if val_acc does not improve for this many epochs (0=disabled)")
-    parser.add_argument("--feat-dropout", type=float, default=0.1,
+    parser.add_argument("--feat-dropout", type=float, default=0.15,
                         help="Randomly zero out this fraction of patches per frame during training")
+    parser.add_argument(
+        "--balanced-sampling",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use weighted class-balanced sampling when train split is imbalanced",
+    )
+    parser.add_argument(
+        "--imbalance-ratio-threshold",
+        type=float,
+        default=1.25,
+        help="Enable class balancing/weighting only if max_class/min_class >= threshold",
+    )
     parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--fold", type=int, default=None,
                         help="Run specific fold only (default: all folds)")
@@ -421,7 +451,7 @@ def main():
     # Memory / performance
     parser.add_argument("--amp", action="store_true",
                         help="Enable automatic mixed precision (float16)")
-    parser.add_argument("--grad-accum-steps", type=int, default=1,
+    parser.add_argument("--grad-accum-steps", type=int, default=2,
                         help="Gradient accumulation steps (effective bs = batch_size * accum)")
 
     # General
@@ -488,7 +518,8 @@ def main():
             grad_accum_steps=args.grad_accum_steps,
             early_stop_patience=args.early_stop_patience,
             feat_dropout=args.feat_dropout,
-            label_smoothing=args.label_smoothing,
+            balanced_sampling=args.balanced_sampling,
+            imbalance_ratio_threshold=args.imbalance_ratio_threshold,
         )
         all_results.append(result)
     
