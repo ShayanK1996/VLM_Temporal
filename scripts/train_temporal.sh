@@ -65,11 +65,14 @@ OUTPUT_DIR="${OUTPUT_DIR:-${VLM_WORK_ROOT}/checkpoints/temporal_v1}"
 # --- Hyperparameters ---
 # Smaller architecture to match ~1K training samples (reduces overfitting)
 # kernel=7 (no pool): full dilated RF over 16 frames, same as sensor model
-NUM_EPOCHS=20
+NUM_EPOCHS=30
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-4}"  # effective bs = 8*4 = 32
 NUM_WORKERS="${NUM_WORKERS:-0}"
-LR=1e-3
+LR=3e-4              # was 1e-3 — lower LR + warmup prevents early memorization
+LABEL_SMOOTHING=0.1  # regularizes CE loss; prevents overconfident predictions
+EARLY_STOP_PATIENCE=7  # stop if val_acc stagnates for 7 epochs
+FEAT_DROPOUT=0.1     # randomly zero 10% of patches per frame during training
 D_BRANCH=64          # was 128 — halves the spatial projection params
 N_BRANCHES=4
 TEMPORAL_HIDDEN=32   # was 64
@@ -113,6 +116,7 @@ echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
 echo "Features: $FEATURE_DIR"
 echo ""
 echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, accum=$GRAD_ACCUM_STEPS (eff=$((BATCH_SIZE*GRAD_ACCUM_STEPS))), workers=$NUM_WORKERS, lr=$LR, amp=$AMP"
+echo "Regularization: label_smooth=$LABEL_SMOOTHING, early_stop=$EARLY_STOP_PATIENCE, feat_dropout=$FEAT_DROPOUT"
 echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS, kernel=$TEMPORAL_KERNEL"
 echo ""
 
@@ -128,6 +132,9 @@ python -u -m src.training.train_temporal \
     --grad-accum-steps "$GRAD_ACCUM_STEPS" \
     --num-workers "$NUM_WORKERS" \
     --lr "$LR" \
+    --label-smoothing "$LABEL_SMOOTHING" \
+    --early-stop-patience "$EARLY_STOP_PATIENCE" \
+    --feat-dropout "$FEAT_DROPOUT" \
     --d-branch "$D_BRANCH" \
     --n-branches "$N_BRANCHES" \
     --temporal-hidden "$TEMPORAL_HIDDEN" \

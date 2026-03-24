@@ -57,12 +57,13 @@ class TemporalModelConfig:
     num_classes: int = 2
     
     # Training
-    learning_rate: float = 1e-3
+    learning_rate: float = 3e-4
     weight_decay: float = 1e-4
-    warmup_ratio: float = 0.05
+    warmup_ratio: float = 0.1
     num_epochs: int = 20
     batch_size: int = 32
     grad_clip: float = 1.0
+    label_smoothing: float = 0.1
     
     # LoRA (for stage 2 end-to-end)
     lora_r: int = 16
@@ -213,7 +214,7 @@ class TemporalBehaviorModel(nn.Module):
         }
         
         if labels is not None:
-            ce_loss = F.cross_entropy(logits, labels)
+            ce_loss = F.cross_entropy(logits, labels, label_smoothing=self.config.label_smoothing)
             output['ce_loss'] = ce_loss
             output['loss'] = ce_loss + div_loss
         

@@ -49,8 +49,9 @@ def train_one_epoch(
     device: str,
     grad_clip: float = 1.0,
     use_amp: bool = False,
-    scaler: torch.cuda.amp.GradScaler | None = None,
+    scaler: "torch.amp.GradScaler | None" = None,
     grad_accum_steps: int = 1,
+    feat_dropout: float = 0.0,
 ) -> Dict[str, float]:
     """Train for one epoch with optional AMP and gradient accumulation."""
     model.train()
@@ -67,9 +68,14 @@ def train_one_epoch(
     for step, batch in enumerate(loader):
         patches = batch["patches"].to(device)   # (B, T, N, D)
         patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
+        if feat_dropout > 0.0:
+            mask = torch.bernoulli(
+                torch.full(patches.shape[:3], 1.0 - feat_dropout, device=device)
+            ).unsqueeze(-1)
+            patches = patches * mask
         labels = batch["label"].to(device)       # (B,)
 
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             output = model(patches, labels=labels)
             loss = output["loss"]
 
@@ -141,7 +147,7 @@ def evaluate(
         patches = torch.nan_to_num(patches, nan=0.0, posinf=0.0, neginf=0.0)
         labels = batch["label"].to(device)
 
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             output = model(patches, labels=labels)
         if not torch.isfinite(output["loss"]):
             skipped_non_finite += 1
@@ -213,6 +219,9 @@ def run_fold(
     num_workers: int = 0,
     use_amp: bool = False,
     grad_accum_steps: int = 1,
+    early_stop_patience: int = 0,
+    feat_dropout: float = 0.0,
+    label_smoothing: float = 0.0,
 ) -> Dict:
     """Train and evaluate one fold."""
     print(f"\n{'='*60}")
@@ -249,7 +258,7 @@ def run_fold(
     print(f"  Trainable parameters: {n_params:,}")
 
     # AMP scaler
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     # Optimizer
     optimizer = AdamW(
@@ -257,16 +266,25 @@ def run_fold(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=config.num_epochs,
-        eta_min=1e-6,
+
+    # Warmup for first 10% of epochs, then cosine decay
+    warmup_epochs = max(1, int(0.1 * config.num_epochs))
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
+    )
+    cosine_scheduler = CosineAnnealingLR(
+        optimizer, T_max=config.num_epochs - warmup_epochs, eta_min=1e-6,
+    )
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer, schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[warmup_epochs],
     )
 
     # Training loop
     best_val_acc = 0.0
     best_epoch = 0
     history = []
+    epochs_no_improve = 0
 
     for epoch in range(config.num_epochs):
         t0 = time.time()
@@ -277,6 +295,7 @@ def run_fold(
             use_amp=use_amp,
             scaler=scaler,
             grad_accum_steps=grad_accum_steps,
+            feat_dropout=feat_dropout,
         )
         val_metrics = evaluate(model, val_loader, device, use_amp=use_amp)
         scheduler.step()
@@ -292,19 +311,22 @@ def run_fold(
         }
         history.append(epoch_record)
         
+        lr_now = optimizer.param_groups[0]["lr"]
+
         # Logging
         print(
             f"  Epoch {epoch:3d} | "
             f"train_loss={train_metrics['loss']:.4f} train_acc={train_metrics['accuracy']:.3f} | "
             f"val_loss={val_metrics['loss']:.4f} val_acc={val_metrics['accuracy']:.3f} | "
             f"NI_f1={val_metrics['needs_improvement_f1']:.3f} G_f1={val_metrics['good_f1']:.3f} | "
-            f"{elapsed:.1f}s"
+            f"lr={lr_now:.2e} | {elapsed:.1f}s"
         )
-        
-        # Save best
+
+        # Save best / early stopping
         if val_metrics["accuracy"] > best_val_acc:
             best_val_acc = val_metrics["accuracy"]
             best_epoch = epoch
+            epochs_no_improve = 0
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -312,7 +334,12 @@ def run_fold(
                 "val_metrics": val_metrics,
                 "config": config.__dict__,
             }, fold_dir / "best_model.pt")
-    
+        else:
+            epochs_no_improve += 1
+            if early_stop_patience > 0 and epochs_no_improve >= early_stop_patience:
+                print(f"  Early stopping at epoch {epoch} (no improvement for {early_stop_patience} epochs)")
+                break
+
     # Save training history
     with open(fold_dir / "history.json", "w") as f:
         json.dump(history, f, indent=2, default=str)
@@ -357,11 +384,17 @@ def main():
     parser.add_argument("--diversity-weight", type=float, default=0.1)
     
     # Training
-    parser.add_argument("--num-epochs", type=int, default=15)
+    parser.add_argument("--num-epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--grad-clip", type=float, default=1.0)
+    parser.add_argument("--label-smoothing", type=float, default=0.1,
+                        help="Label smoothing for CE loss (0=off, 0.1=recommended)")
+    parser.add_argument("--early-stop-patience", type=int, default=7,
+                        help="Stop if val_acc does not improve for this many epochs (0=disabled)")
+    parser.add_argument("--feat-dropout", type=float, default=0.1,
+                        help="Randomly zero out this fraction of patches per frame during training")
     parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--fold", type=int, default=None,
                         help="Run specific fold only (default: all folds)")
@@ -371,7 +404,7 @@ def main():
         default=0,
         help="DataLoader workers (default 0 — safest on NFS / Slurm; try 2–4 if local SSD)",
     )
-    
+
     # Memory / performance
     parser.add_argument("--amp", action="store_true",
                         help="Enable automatic mixed precision (float16)")
@@ -414,6 +447,7 @@ def main():
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
         grad_clip=args.grad_clip,
+        label_smoothing=args.label_smoothing,
         num_frames=16,
     )
     
@@ -439,6 +473,9 @@ def main():
             num_workers=args.num_workers,
             use_amp=args.amp,
             grad_accum_steps=args.grad_accum_steps,
+            early_stop_patience=args.early_stop_patience,
+            feat_dropout=args.feat_dropout,
+            label_smoothing=args.label_smoothing,
         )
         all_results.append(result)
     
