@@ -64,6 +64,7 @@ class TemporalModelConfig:
     batch_size: int = 8
     grad_clip: float = 1.0
     label_smoothing: float = 0.1
+    focal_gamma: float = 2.0     # focal loss gamma (0 = standard CE)
     
     # LoRA (for stage 2 end-to-end)
     lora_r: int = 16
@@ -215,11 +216,7 @@ class TemporalBehaviorModel(nn.Module):
         }
         
         if labels is not None:
-            ce_loss = F.cross_entropy(
-                logits, labels,
-                weight=class_weight,
-                label_smoothing=self.config.label_smoothing,
-            )
+            ce_loss = self._focal_loss(logits, labels, class_weight)
             output['ce_loss'] = ce_loss
             output['loss'] = ce_loss + div_loss
         
@@ -229,6 +226,35 @@ class TemporalBehaviorModel(nn.Module):
         
         return output
     
+    def _focal_loss(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        class_weight: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Focal loss: (1 - p_t)^gamma * CE.
+
+        When gamma=0 this is standard CE. When gamma>0, confident-and-correct
+        predictions (the "predict majority class" shortcut) are downweighted,
+        forcing the model to pay attention to the minority class from epoch 0.
+        """
+        gamma = self.config.focal_gamma
+        smoothing = self.config.label_smoothing
+
+        ce = F.cross_entropy(
+            logits, labels,
+            weight=class_weight,
+            label_smoothing=smoothing,
+            reduction="none",
+        )
+        if gamma == 0.0:
+            return ce.mean()
+
+        with torch.no_grad():
+            p_t = torch.exp(-ce)  # probability of the true class
+        modulator = (1.0 - p_t) ** gamma
+        return (modulator * ce).mean()
+
     def predict(self, frame_patches: torch.Tensor) -> torch.Tensor:
         """Simple prediction interface.
         

@@ -71,6 +71,7 @@ GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-2}"  # effective bs = 8*2 = 16
 NUM_WORKERS="${NUM_WORKERS:-0}"
 LR=2e-4              # lower LR to reduce early memorization
 LABEL_SMOOTHING=0.1  # regularizes CE loss; prevents overconfident predictions
+FOCAL_GAMMA=2.0      # focal loss — prevents "predict majority class" collapse at epoch 0
 EARLY_STOP_PATIENCE=5  # stop quickly once overfitting starts
 FEAT_DROPOUT=0.15    # stronger feature-level regularization
 BALANCED_SAMPLING=1  # auto-applies only when split is imbalanced
@@ -118,7 +119,7 @@ echo "Artifact root (VLM_WORK_ROOT): $VLM_WORK_ROOT"
 echo "Features: $FEATURE_DIR"
 echo ""
 echo "Config: epochs=$NUM_EPOCHS, bs=$BATCH_SIZE, accum=$GRAD_ACCUM_STEPS (eff=$((BATCH_SIZE*GRAD_ACCUM_STEPS))), workers=$NUM_WORKERS, lr=$LR, amp=$AMP"
-echo "Regularization: label_smooth=$LABEL_SMOOTHING, early_stop=$EARLY_STOP_PATIENCE, feat_dropout=$FEAT_DROPOUT, balanced=$BALANCED_SAMPLING, ratio_thr=$IMBALANCE_RATIO_THRESHOLD"
+echo "Regularization: label_smooth=$LABEL_SMOOTHING, focal_gamma=$FOCAL_GAMMA, early_stop=$EARLY_STOP_PATIENCE, feat_dropout=$FEAT_DROPOUT, balanced=$BALANCED_SAMPLING, ratio_thr=$IMBALANCE_RATIO_THRESHOLD"
 echo "Architecture: d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS, kernel=$TEMPORAL_KERNEL"
 echo ""
 
@@ -137,6 +138,7 @@ python -u -m src.training.train_temporal \
     --num-workers "$NUM_WORKERS" \
     --lr "$LR" \
     --label-smoothing "$LABEL_SMOOTHING" \
+    --focal-gamma "$FOCAL_GAMMA" \
     --early-stop-patience "$EARLY_STOP_PATIENCE" \
     --feat-dropout "$FEAT_DROPOUT" \
     --imbalance-ratio-threshold "$IMBALANCE_RATIO_THRESHOLD" \

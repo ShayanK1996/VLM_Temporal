@@ -422,6 +422,8 @@ def main():
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--label-smoothing", type=float, default=0.1,
                         help="Label smoothing for CE loss (0=off, 0.1=recommended)")
+    parser.add_argument("--focal-gamma", type=float, default=2.0,
+                        help="Focal loss gamma (0=standard CE, 2.0=recommended)")
     parser.add_argument("--early-stop-patience", type=int, default=5,
                         help="Stop if val_acc does not improve for this many epochs (0=disabled)")
     parser.add_argument("--feat-dropout", type=float, default=0.15,
@@ -491,6 +493,7 @@ def main():
         weight_decay=args.weight_decay,
         grad_clip=args.grad_clip,
         label_smoothing=args.label_smoothing,
+        focal_gamma=args.focal_gamma,
         num_frames=16,
     )
     

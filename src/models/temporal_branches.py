@@ -281,13 +281,15 @@ class VisualTemporalAttention(nn.Module):
             for _ in range(n_attn_layers)
         ])
         
-        # Classification head
+        # Classification head — final layer has no bias so the model can't
+        # learn the class prior through the bias term alone (prevents the
+        # "predict majority class for everything" collapse in early epochs)
         self.classifier = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Linear(d_model, mlp_hidden),
             nn.GELU(),
             nn.Dropout(mlp_dropout),
-            nn.Linear(mlp_hidden, num_classes),
+            nn.Linear(mlp_hidden, num_classes, bias=False),
         )
         
         self._init_weights()
