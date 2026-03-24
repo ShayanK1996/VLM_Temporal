@@ -86,9 +86,9 @@ DIVERSITY_WEIGHT=0.05
 TEMPORAL_KERNEL=7    # was 3 — kernel=7 with dilations [1,2,3] covers full 16-frame sequence
 AMP=1                # mixed precision — halves activation memory
 
-# --- Run single fold for validation/debug ---
-# Default: fold 0 only
-FOLD_ARG="--fold 0"
+# --- Fold selection ---
+# "--fold 0" for single-fold debug; remove to run all 5 folds
+FOLD_ARG=""
 
 mkdir -p logs_stage_1 "$OUTPUT_DIR"
 

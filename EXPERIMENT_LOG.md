@@ -49,6 +49,14 @@ CVPR 2027 main track (with distillation + Study 1b data).
 - **Fix** (`src/training/train_temporal.py`): `run_fold` computes inverse-frequency class weights from training labels **only when imbalance is meaningful** (same threshold). Model selection switched from `val_acc` to **macro-F1** (`(NI_f1 + G_f1) / 2`) — accuracy is misleading when folds are skewed.
 - **Fix** (`scripts/train_temporal.sh`): Model simplified further (`d_branch=32`, `temporal_hidden/out=16`, `n_heads=1`), LR lowered (`2e-4`), stronger regularization (`feat_dropout=0.15`), and faster stopping (`patience=5`).
 
+### BUG-006: Prediction collapse — G_f1 ≈ 0 in early epochs (majority-class shortcut)
+- **Symptom**: Job 53857029 — Focal loss not yet applied. G_f1 started at 0.030 (epoch 0), briefly rose to 0.286 (epoch 2), then collapsed back to 0.015 (epoch 3). The model repeatedly fell into predicting NI for all samples because the classifier's bias term could minimize CE loss by simply matching the class prior. Job was externally cancelled (SIGTERM) at epoch 3.
+- **Cause**: Standard CE loss rewards confident majority-class predictions. With random-init features, the final linear layer's **bias** nudges toward the larger class within the first epoch. Once the NI logit is slightly higher, the positive feedback loop drives G_f1 → 0. Label smoothing and class weighting alone are not sufficient to break this collapse.
+- **Fix** (`src/models/vlm_temporal_model.py`): Replaced CE with **focal loss** — `(1 - p_t)^gamma * CE` with `gamma=2.0`. Confident correct predictions (easy NI samples) get near-zero loss weight; mistakes on "good" samples get full weight. Configurable via `focal_gamma` in `TemporalModelConfig`.
+- **Fix** (`src/models/temporal_branches.py`): Removed bias from the final classifier layer (`nn.Linear(mlp_hidden, num_classes, bias=False)`) so the model cannot learn the class prior through bias alone.
+- **Fix** (`scripts/train_temporal.sh`): Added `FOCAL_GAMMA=2.0` and `--focal-gamma` CLI arg.
+- **Result**: Job 53887524 — G_f1 rose to **0.656** at epoch 4 (vs 0.286 before), macro_f1 = **0.731** (vs 0.544 before), val_acc = **75.2%**. Model no longer collapses to majority-class prediction.
+
 ---
 
 ## Experiment Index
@@ -59,9 +67,10 @@ CVPR 2027 main track (with distillation + Study 1b data).
 | EXP-002 | 53826378 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix) | — | — | Crashed — DataLoader OOM |
 | EXP-003 | 53826776 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix applied) | — | — | Crashed — CUDA OOM during backward |
 | EXP-004 | 53827575 | 2026-03-23 | epochs=20, bs=8, accum=4, lr=1e-3, AMP (BUG-003 fixes) | 0.741 (ep8) | ~0.699 | Overfit; ran all 20 epochs |
-| EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, AMP, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable — class imbalance not yet addressed |
-| EXP-006 | 53851545 | 2026-03-24 | +WeightedSampler/class-weighting/macro-F1, bs=8 accum=2 | in-progress | in-progress | Instrumented split counts: train nearly balanced (561/516) |
-| EXP-007 | — | — | Smaller model + conditional balancing + bs=16 accum=2 | TBD | TBD | Next run |
+| EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, AMP, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable |
+| EXP-006 | 53851545 | 2026-03-24 | +WeightedSampler/class-weighting/macro-F1, bs=8 accum=2 | — | — | Instrumented split counts: train nearly balanced (561/516) |
+| EXP-007 | 53857029 | 2026-03-24 | Smaller model + conditional balancing, bs=8 accum=2, eff=16 | — | — | Externally cancelled (SIGTERM) at epoch 3; no code error |
+| **EXP-008** | **53887524** | **2026-03-24** | **+Focal loss (γ=2), no classifier bias, bs=8 accum=2** | **0.752 (ep4)** | **0.731** | **Best run. Early stopped ep9. G_f1=0.656. Fold 0 only.** |
 
 ## Current Config (scripts/train_temporal.sh)
 ```
@@ -72,6 +81,7 @@ N_BRANCHES=4             TEMPORAL_HIDDEN=16
 TEMPORAL_OUT=16          N_HEADS=1
 N_ATTN_LAYERS=1          TEMPORAL_KERNEL=7
 AMP=1                    LABEL_SMOOTHING=0.1
-EARLY_STOP_PATIENCE=5    FEAT_DROPOUT=0.15
-BALANCED_SAMPLING=1      IMBALANCE_RATIO_THRESHOLD=1.25
+FOCAL_GAMMA=2.0          EARLY_STOP_PATIENCE=5
+FEAT_DROPOUT=0.15        BALANCED_SAMPLING=1
+IMBALANCE_RATIO_THRESHOLD=1.25
 ```
