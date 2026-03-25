@@ -149,14 +149,19 @@ def get_e2e_fold_split(
     train_ds = VideoSegmentDataset(train_entries, processor, num_frames, video_root)
     val_ds = VideoSegmentDataset(val_entries, processor, num_frames, video_root)
 
+    pin = num_workers > 0
     train_loader = DataLoader(
         train_ds, batch_size=1, shuffle=True,
-        num_workers=num_workers, pin_memory=False,
+        num_workers=num_workers, pin_memory=pin,
+        prefetch_factor=2 if num_workers > 0 else None,
+        persistent_workers=num_workers > 0,
         collate_fn=_identity_collate,
     )
     val_loader = DataLoader(
         val_ds, batch_size=1, shuffle=False,
-        num_workers=num_workers, pin_memory=False,
+        num_workers=num_workers, pin_memory=pin,
+        prefetch_factor=2 if num_workers > 0 else None,
+        persistent_workers=num_workers > 0,
         collate_fn=_identity_collate,
     )
 

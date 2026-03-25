@@ -176,6 +176,9 @@ def train_one_epoch(
     correct = 0
     total = 0
     steps_done = 0
+    n_steps = len(train_loader)
+    log_interval = max(1, n_steps // 40)  # ~40 log lines per epoch
+    t0 = time.time()
 
     for step, batch in enumerate(train_loader):
         pv = batch["pixel_values"].to(device)
@@ -206,6 +209,17 @@ def train_one_epoch(
             correct += (pred == labels).sum().item()
             total += labels.shape[0]
 
+        if (step + 1) % log_interval == 0 or (step + 1) == n_steps:
+            elapsed = time.time() - t0
+            sec_per_step = elapsed / (step + 1)
+            eta = sec_per_step * (n_steps - step - 1)
+            avg_loss = total_loss / max(total, 1)
+            acc = correct / max(total, 1)
+            print(f"  [train] {step+1}/{n_steps}  "
+                  f"loss={avg_loss:.4f}  acc={acc:.3f}  "
+                  f"{sec_per_step:.2f}s/step  "
+                  f"ETA {eta/60:.1f}min", flush=True)
+
     return {
         "loss": total_loss / max(total, 1),
         "accuracy": correct / max(total, 1),
@@ -230,8 +244,10 @@ def evaluate(
     all_preds = []
     all_labels = []
     all_food_types = []
+    n_val = len(val_loader)
+    t0 = time.time()
 
-    for batch in val_loader:
+    for vi, batch in enumerate(val_loader):
         pv = batch["pixel_values"].to(device)
         grid = batch["image_grid_thw"].to(device)
         labels = batch["label"].unsqueeze(0).to(device)
@@ -246,6 +262,12 @@ def evaluate(
         all_preds.append(pred.cpu().item())
         all_labels.append(labels.cpu().item())
         all_food_types.append(batch.get("food_type", "unknown"))
+
+        if (vi + 1) % max(1, n_val // 10) == 0 or (vi + 1) == n_val:
+            elapsed = time.time() - t0
+            print(f"  [val] {vi+1}/{n_val}  "
+                  f"{elapsed/(vi+1):.2f}s/step  "
+                  f"ETA {elapsed/(vi+1)*(n_val-vi-1)/60:.1f}min", flush=True)
 
     accuracy = correct / max(total, 1)
     all_preds = np.array(all_preds)
