@@ -3,7 +3,7 @@
 #SBATCH --partition=uri-gpu
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=a100-80g
-#SBATCH --mem=128G
+#SBATCH --mem=250G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs_stage_2/train_e2e_%j.out
