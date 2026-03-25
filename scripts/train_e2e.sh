@@ -86,6 +86,9 @@ LORA_R=16
 LORA_ALPHA=32
 LORA_DROPOUT=0.05
 
+# Resolution cap — limits ViT attention N² (default Qwen2.5-VL is way too high).
+# 256*28*28 = 200704 → ~320 merged patches/frame (matches Stage 1 features).
+MAX_PIXELS=200704
 # --- Fold selection ---
 # "--fold 0" for single-fold debug; remove for all 5 folds
 FOLD_ARG="--fold 0"
@@ -93,6 +96,7 @@ FOLD_ARG="--fold 0"
 mkdir -p logs_stage_2 "$OUTPUT_DIR"
 cd "$REPO_DIR"
 export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "=== Slurm diagnostics ==="
 echo "SLURM_JOB_ID=${SLURM_JOB_ID:-n/a}  Partition: ${SLURM_JOB_PARTITION:-n/a}"
@@ -110,6 +114,7 @@ echo "Config: epochs=$NUM_EPOCHS, accum=$GRAD_ACCUM_STEPS (eff=$GRAD_ACCUM_STEPS
 echo "LR: lora=$LORA_LR, temporal=$TEMPORAL_LR | LoRA: r=$LORA_R, alpha=$LORA_ALPHA"
 echo "Regularization: focal_gamma=$FOCAL_GAMMA, label_smooth=$LABEL_SMOOTHING, early_stop=$EARLY_STOP_PATIENCE"
 echo "Architecture: d_vision=$D_VISION, d_branch=$D_BRANCH, n_branches=$N_BRANCHES, heads=$N_HEADS, layers=$N_ATTN_LAYERS, kernel=$TEMPORAL_KERNEL"
+echo "Resolution: max_pixels=$MAX_PIXELS | CUDA alloc: $PYTORCH_CUDA_ALLOC_CONF"
 echo ""
 
 python -u -m src.training.train_e2e \
@@ -137,6 +142,7 @@ python -u -m src.training.train_e2e \
     --lora-r "$LORA_R" \
     --lora-alpha "$LORA_ALPHA" \
     --lora-dropout "$LORA_DROPOUT" \
+    --max-pixels "$MAX_PIXELS" \
     $FOLD_ARG
 
 echo ""
