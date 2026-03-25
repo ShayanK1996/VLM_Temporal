@@ -5,8 +5,9 @@ cached_features/
 *.pt
 *.pth
 
-# Checkpoints
+# Checkpoints & results (model weights are large)
 checkpoints/
+results/
 outputs/
 
 # Logs

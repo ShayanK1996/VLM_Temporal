@@ -55,7 +55,7 @@ CVPR 2027 main track (with distillation + Study 1b data).
 - **Fix** (`src/models/vlm_temporal_model.py`): Replaced CE with **focal loss** — `(1 - p_t)^gamma * CE` with `gamma=2.0`. Confident correct predictions (easy NI samples) get near-zero loss weight; mistakes on "good" samples get full weight. Configurable via `focal_gamma` in `TemporalModelConfig`.
 - **Fix** (`src/models/temporal_branches.py`): Removed bias from the final classifier layer (`nn.Linear(mlp_hidden, num_classes, bias=False)`) so the model cannot learn the class prior through bias alone.
 - **Fix** (`scripts/train_temporal.sh`): Added `FOCAL_GAMMA=2.0` and `--focal-gamma` CLI arg.
-- **Result**: Job 53887524 — G_f1 rose to **0.656** at epoch 4 (vs 0.286 before), macro_f1 = **0.731** (vs 0.544 before), val_acc = **75.2%**. Model no longer collapses to majority-class prediction.
+- **Result**: Job 53887524 (fold 0 only) — G_f1 rose to **0.656** at epoch 4 (vs 0.286 before), macro_f1 = **0.731** (vs 0.544 before), val_acc = **75.2%**. Model no longer collapses to majority-class prediction.
 
 ---
 
@@ -67,10 +67,65 @@ CVPR 2027 main track (with distillation + Study 1b data).
 | EXP-002 | 53826378 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix) | — | — | Crashed — DataLoader OOM |
 | EXP-003 | 53826776 | 2026-03-23 | epochs=20, bs=32, workers=0 (BUG-002 fix applied) | — | — | Crashed — CUDA OOM during backward |
 | EXP-004 | 53827575 | 2026-03-23 | epochs=20, bs=8, accum=4, lr=1e-3, AMP (BUG-003 fixes) | 0.741 (ep8) | ~0.699 | Overfit; ran all 20 epochs |
-| EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, AMP, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable |
-| EXP-006 | 53851545 | 2026-03-24 | +WeightedSampler/class-weighting/macro-F1, bs=8 accum=2 | — | — | Instrumented split counts: train nearly balanced (561/516) |
+| EXP-005 | 53849283 | 2026-03-24 | epochs=30, bs=8, accum=4, lr=3e-4, warmup, early_stop=7, feat_drop=0.1, label_smooth=0.1 | 0.710 (ep7) | 0.667 | Early stopped ep14; G_f1 unstable |
+| EXP-006 | 53851545 | 2026-03-24 | +WeightedSampler/class-weighting/macro-F1, bs=8 accum=2 | — | — | Instrumented split counts: train near-balanced (561/516) |
 | EXP-007 | 53857029 | 2026-03-24 | Smaller model + conditional balancing, bs=8 accum=2, eff=16 | — | — | Externally cancelled (SIGTERM) at epoch 3; no code error |
-| **EXP-008** | **53887524** | **2026-03-24** | **+Focal loss (γ=2), no classifier bias, bs=8 accum=2** | **0.752 (ep4)** | **0.731** | **Best run. Early stopped ep9. G_f1=0.656. Fold 0 only.** |
+| EXP-008 | 53887524 | 2026-03-24 | +Focal loss (γ=2), no classifier bias, bs=8 accum=2 | 0.752 (ep4) | 0.731 | Fold 0 only. Early stopped ep9. G_f1=0.656 |
+| **EXP-009** | **53940459** | **2026-03-24** | **Same as EXP-008, full 5-fold CV** | **0.760 ± 0.038** | **0.754 ± 0.039** | **Stage 1 complete. Results below.** |
+
+---
+
+## EXP-009 — Full 5-Fold CV Results (Stage 1 Final)
+
+**Job**: 53940459 | **Date**: 2026-03-24/25 | **Runtime**: ~16 hours | **GPU**: A100-SXM4-80GB
+
+### Cross-Validation Summary
+
+| Metric | Mean ± Std |
+|--------|-----------|
+| **Macro-F1** | **0.754 ± 0.039** |
+| **Accuracy** | **0.760 ± 0.038** |
+
+### Per-Fold Breakdown
+
+| Fold | Samples (train/val) | Balanced? | Best Epoch | Val Acc | Macro-F1 | NI_f1 | G_f1 | Stopped |
+|------|--------------------:|-----------|:----------:|--------:|---------:|------:|-----:|--------:|
+| 0 | 1077 / 355 | No  (1.09) | 4  | 0.749 | 0.731 | 0.806 | 0.656 | ep 9 |
+| 1 | 1195 / 237 | Yes (1.28) | 10 | 0.785 | 0.785 | 0.787 | 0.783 | ep 15 |
+| 2 | 1085 / 347 | No  (1.12) | 19 | 0.810 | 0.799 | 0.846 | 0.752 | full 20 |
+| 3 | 1215 / 217 | Yes (1.25) | 10 | 0.765 | 0.764 | 0.749 | 0.779 | ep 15 |
+| 4 | 1156 / 276 | Yes (1.32) | 5  | 0.696 | 0.691 | 0.641 | 0.741 | ep 10 |
+
+### Per-Food-Type Accuracy
+
+| Food | Accuracy (mean ± std) |
+|------|-----------------------|
+| Churros | **0.824 ± 0.069** |
+| Chips & Salsa | 0.764 ± 0.055 |
+| Carrots | 0.736 ± 0.062 |
+| Rice & Beans | 0.732 ± 0.077 |
+
+### Comparison to Baseline
+
+| Method | Accuracy (5-fold CV) | Improvement |
+|--------|---------------------|-------------|
+| Majority class | 54.3% | — |
+| LoRA-only (IMWUT baseline) | 63.2% ± 6.7% | — |
+| **Stage 1: Spatial+Temporal on cached features** | **76.0% ± 3.8%** | **+12.8 pp** |
+
+### Key Observations
+- **G_f1 is stable across all folds** — focal loss eliminated the prediction collapse.
+- **Best fold** (2): macro_f1=0.799, val_acc=81.0%. Ran all 20 epochs without early stopping.
+- **Weakest fold** (4): macro_f1=0.691. This fold had the highest train imbalance (1.32) and smallest effective training per epoch (early stopped at ep 5).
+- **No overfitting**: train_acc peaks at ~84% vs val_acc ~76% — healthy generalization gap.
+- **Conditional balancing worked correctly**: folds 1, 3, 4 (ratio ≥ 1.25) used weighted sampling + class weights; folds 0, 2 did not.
+
+### Local Results
+- Checkpoints: `results/temporal_v1_5fold/temporal_v1/`
+- Training log: `results/temporal_v1_5fold/train_log_53940459.out`
+- CV summary: `results/temporal_v1_5fold/temporal_v1/cv_summary.json`
+
+---
 
 ## Current Config (scripts/train_temporal.sh)
 ```
