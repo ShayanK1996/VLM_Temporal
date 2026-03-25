@@ -55,6 +55,7 @@ def setup_vlm_with_lora(
     lora_r: int = 16,
     lora_alpha: int = 32,
     lora_dropout: float = 0.05,
+    max_pixels: int = 200704,
     device: str = "cuda",
 ):
     """Load Qwen2.5-VL and apply LoRA to the **visual encoder** only.
@@ -72,7 +73,11 @@ def setup_vlm_with_lora(
     from peft import LoraConfig, get_peft_model
 
     print(f"Loading {model_name} ...")
-    processor = Qwen2_5_VLProcessor.from_pretrained(model_name)
+    processor = Qwen2_5_VLProcessor.from_pretrained(
+        model_name,
+        min_pixels=4 * 28 * 28,
+        max_pixels=max_pixels,
+    )
 
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_name,
@@ -479,6 +484,7 @@ def main():
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--max-pixels", type=int, default=200704)
 
     # Architecture (must match Stage 1)
     parser.add_argument("--d-vision", type=int, default=1280)
@@ -529,6 +535,7 @@ def main():
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
+        max_pixels=args.max_pixels,
         device=device,
     )
 
