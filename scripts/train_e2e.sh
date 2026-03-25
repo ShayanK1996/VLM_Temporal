@@ -5,7 +5,7 @@
 #SBATCH --constraint=a100-80g
 #SBATCH --mem=250G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=1-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=logs_stage_2/train_e2e_%j.out
 #SBATCH --error=logs_stage_2/train_e2e_%j.err
 
@@ -90,8 +90,8 @@ LORA_DROPOUT=0.05
 # 256*28*28 = 200704 → ~320 merged patches/frame (matches Stage 1 features).
 MAX_PIXELS=200704
 # --- Fold selection ---
-# "--fold 0" for single-fold debug; remove for all 5 folds
-FOLD_ARG="--fold 0"
+# Empty = all 5 folds; use "--fold 0" for single-fold debug
+FOLD_ARG=""
 
 mkdir -p logs_stage_2 "$OUTPUT_DIR"
 cd "$REPO_DIR"
