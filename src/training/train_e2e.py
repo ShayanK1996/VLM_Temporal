@@ -55,13 +55,13 @@ def setup_vlm_with_lora(
     lora_r: int = 16,
     lora_alpha: int = 32,
     lora_dropout: float = 0.05,
+    max_pixels: int = 200704,
     device: str = "cuda",
 ):
     """Load Qwen2.5-VL and apply LoRA to the **visual encoder** only.
 
     LoRA targets ``qkv`` (fused Q/K/V projection in each ViT block).
-    The language model is loaded but frozen and never called during training,
-    keeping memory overhead minimal.
+    The LM decoder stays on CPU (never called) to save ~5 GB of VRAM.
 
     Returns (vlm_model, processor, visual_encoder).
     """
@@ -72,8 +72,22 @@ def setup_vlm_with_lora(
     from peft import LoraConfig, get_peft_model
 
     print(f"Loading {model_name} ...")
-    processor = Qwen2_5_VLProcessor.from_pretrained(model_name)
 
+    # Cap resolution so the visual encoder sees ~300 patches/frame instead
+    # of thousands.  Default max_pixels is huge and produces an N² attention
+    # matrix that blows up 80 GB VRAM.
+    # 256 * 28 * 28 = 200704 → roughly 16×20 grid after Qwen's 14px patches
+    # and 2×2 spatial merge → ~320 patches/frame (matches Stage 1 features).
+    processor = Qwen2_5_VLProcessor.from_pretrained(
+        model_name,
+        min_pixels=4 * 28 * 28,
+        max_pixels=max_pixels,
+    )
+    print(f"  Processor max_pixels={max_pixels} "
+          f"(~{max_pixels // (28*28)} spatial blocks → "
+          f"~{max_pixels // (28*28*4)} merged patches/frame)")
+
+    # Load full model on CPU first — we'll selectively move parts to GPU
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
@@ -81,7 +95,6 @@ def setup_vlm_with_lora(
     )
 
     # LoRA on visual encoder attention only.
-    # Qwen2.5-VL ViT uses fused "qkv" projections (not separate q/k/v).
     lora_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
@@ -98,7 +111,17 @@ def setup_vlm_with_lora(
         visual.gradient_checkpointing_enable()
         print("  Visual encoder gradient checkpointing: enabled")
 
-    model = model.to(device)
+    # Move ONLY the visual encoder to GPU.  The LM decoder (~2.4B params)
+    # stays on CPU — it's never called, so keeping it on GPU wastes ~5 GB.
+    visual.to(device)
+    # Patch embed / merger might sit outside the blocks list
+    for name, param in model.named_parameters():
+        if "visual" in name and param.device.type != device:
+            param.data = param.data.to(device)
+
+    n_gpu = sum(p.numel() for p in model.parameters() if p.device.type == "cuda")
+    n_cpu = sum(p.numel() for p in model.parameters() if p.device.type == "cpu")
+    print(f"  GPU params: {n_gpu/1e6:.0f}M  |  CPU params (LM, unused): {n_cpu/1e6:.0f}M")
 
     return model, processor, visual
 
@@ -479,6 +502,9 @@ def main():
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--max-pixels", type=int, default=200704,
+                        help="Max total pixels per frame sent to VLM processor "
+                             "(256*28*28=200704). Reduces ViT attention N².")
 
     # Architecture (must match Stage 1)
     parser.add_argument("--d-vision", type=int, default=1280)
@@ -529,6 +555,7 @@ def main():
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
+        max_pixels=args.max_pixels,
         device=device,
     )
 
