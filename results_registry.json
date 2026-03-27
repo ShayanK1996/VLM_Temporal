@@ -35,5 +35,91 @@
       "source": "RF_CNN_Attention_v3.py, EXP-005"
     }
   },
-  "experiments": []
+  "experiments": [
+    {
+      "id": "EXP-009",
+      "job_id": "53940459",
+      "date": "2026-03-24",
+      "stage": 1,
+      "description": "Full 5-fold CV — Stage 1 temporal module on cached VLM features",
+      "runtime_hours": 16,
+      "gpu": "A100-SXM4-80GB",
+      "config": {
+        "epochs": 20,
+        "batch_size": 8,
+        "grad_accum": 2,
+        "effective_batch": 16,
+        "lr": 2e-4,
+        "d_branch": 32,
+        "n_branches": 4,
+        "temporal_hidden": 16,
+        "temporal_out": 16,
+        "n_heads": 1,
+        "n_attn_layers": 1,
+        "focal_gamma": 2.0,
+        "feat_dropout": 0.15,
+        "label_smoothing": 0.1,
+        "early_stop_patience": 5
+      },
+      "results": {
+        "mean_accuracy": 0.760,
+        "std_accuracy": 0.038,
+        "mean_macro_f1": 0.754,
+        "std_macro_f1": 0.039,
+        "per_fold_accuracy": [0.749, 0.785, 0.810, 0.765, 0.696],
+        "per_fold_macro_f1": [0.731, 0.785, 0.799, 0.764, 0.691],
+        "food_type_accuracy": {
+          "churros": 0.824,
+          "chips_and_salsa": 0.764,
+          "carrots": 0.736,
+          "rice_and_beans": 0.732
+        }
+      },
+      "vs_baseline": {
+        "lora_only_mean": 0.632,
+        "improvement_pp": 12.8
+      },
+      "checkpoint": "results/temporal_v1_5fold/temporal_v1/"
+    },
+    {
+      "id": "EXP-010",
+      "job_id": "54101318",
+      "date": "2026-03-25",
+      "completed": "2026-03-27",
+      "stage": 2,
+      "description": "Full 5-fold CV — Stage 2 end-to-end (LoRA + temporal joint training)",
+      "runtime_hours": 33.5,
+      "gpu": "A100-SXM4-80GB",
+      "config": {
+        "init_from": "EXP-009",
+        "epochs": 5,
+        "lr_lora_peak": 2e-5,
+        "lr_temporal_peak": 2e-4,
+        "lr_schedule": "cosine",
+        "focal_gamma": 2.0,
+        "label_smoothing": 0.1,
+        "best_epoch": 3
+      },
+      "results": {
+        "mean_accuracy": 0.7838,
+        "std_accuracy": 0.0225,
+        "mean_macro_f1": 0.7776,
+        "std_macro_f1": 0.0257,
+        "per_fold_accuracy": [0.800, 0.819, 0.769, 0.756, 0.775],
+        "per_fold_macro_f1": [0.777, 0.825, 0.751, 0.760, 0.774],
+        "food_type_accuracy": {
+          "churros": 0.853,
+          "chips_and_salsa": 0.780,
+          "rice_and_beans": 0.768,
+          "carrots": 0.767
+        }
+      },
+      "vs_baseline": {
+        "lora_only_mean": 0.632,
+        "improvement_pp": 15.2,
+        "vs_stage1_improvement_pp": 2.4
+      },
+      "checkpoint": "/work/pi_walls_uri_edu/skhodabakhsh_uri_edu/VLM_Temporal/checkpoints/e2e_v1"
+    }
+  ]
 }

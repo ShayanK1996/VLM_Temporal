@@ -72,6 +72,7 @@ CVPR 2027 main track (with distillation + Study 1b data).
 | EXP-007 | 53857029 | 2026-03-24 | Smaller model + conditional balancing, bs=8 accum=2, eff=16 | — | — | Externally cancelled (SIGTERM) at epoch 3; no code error |
 | EXP-008 | 53887524 | 2026-03-24 | +Focal loss (γ=2), no classifier bias, bs=8 accum=2 | 0.752 (ep4) | 0.731 | Fold 0 only. Early stopped ep9. G_f1=0.656 |
 | **EXP-009** | **53940459** | **2026-03-24** | **Same as EXP-008, full 5-fold CV** | **0.760 ± 0.038** | **0.754 ± 0.039** | **Stage 1 complete. Results below.** |
+| **EXP-010** | **54101318** | **2026-03-25** | **Stage 2 e2e: LoRA + temporal joint, 5 epochs, cosine LR** | **0.784 ± 0.023** | **0.778 ± 0.026** | **Stage 2 complete. +15.2 pp vs baseline. Results below.** |
 
 ---
 
@@ -124,6 +125,69 @@ CVPR 2027 main track (with distillation + Study 1b data).
 - Checkpoints: `results/temporal_v1_5fold/temporal_v1/`
 - Training log: `results/temporal_v1_5fold/train_log_53940459.out`
 - CV summary: `results/temporal_v1_5fold/temporal_v1/cv_summary.json`
+
+---
+
+---
+
+## EXP-010 — Full 5-Fold CV Results (Stage 2 End-to-End Final)
+
+**Job**: 54101318 | **Date**: 2026-03-25 → 2026-03-27 | **Runtime**: ~33.5 hours | **GPU**: A100-SXM4-80GB  
+**Init**: Stage 1 checkpoint (EXP-009) | **Checkpoint saved**: `/work/pi_walls_uri_edu/skhodabakhsh_uri_edu/VLM_Temporal/checkpoints/e2e_v1`
+
+### Cross-Validation Summary
+
+| Metric | Mean ± Std |
+|--------|-----------|
+| **Macro-F1** | **0.778 ± 0.026** |
+| **Accuracy** | **0.784 ± 0.023** |
+
+### Per-Fold Breakdown
+
+| Fold | Val Acc | Macro-F1 | NI_f1 | G_f1 | Best Epoch |
+|------|--------:|---------:|------:|-----:|:----------:|
+| 0 | 0.800 | 0.777 | — | — | 3 |
+| 1 | 0.819 | 0.825 | — | — | 3 |
+| 2 | 0.769 | 0.751 | — | — | 3 |
+| 3 | 0.756 | 0.760 | — | — | 3 |
+| 4 | 0.775 | 0.774 | — | — | 3 |
+
+### Per-Food-Type Accuracy
+
+| Food | Accuracy (mean ± std) |
+|------|-----------------------|
+| Churros | **0.853 ± 0.063** |
+| Chips & Salsa | 0.780 ± 0.036 |
+| Rice & Beans | 0.768 ± 0.039 |
+| Carrots | 0.767 ± 0.060 |
+
+### Training Progression (representative fold)
+
+| Epoch | Train Acc | Val Acc | Macro-F1 | lr_lora |
+|-------|----------:|--------:|---------:|--------:|
+| 0 | 55.6% | 66.7% | 0.665 | 1.81e-05 |
+| 1 | 67.7% | 72.1% | 0.719 | 1.31e-05 |
+| 2 | 74.6% | 76.8% | 0.760 | 6.98e-06 |
+| **3** | **79.4%** | **77.9%** | **0.774** | 2.00e-06 |
+| 4 | 80.7% | 77.5% | 0.765 | 1.00e-07 |
+
+### Comparison to All Baselines
+
+| Method | Accuracy (5-fold CV) | Macro-F1 | Improvement vs LoRA-only |
+|--------|---------------------|----------|--------------------------|
+| Majority class | 54.3% | — | — |
+| Zero-shot Qwen2.5-VL | 24.1% | — | — |
+| LoRA-only (IMWUT baseline) | 63.2% ± 6.7% | — | — |
+| Stage 1: Spatial+Temporal (cached features) | 76.0% ± 3.8% | 0.754 ± 0.039 | +12.8 pp |
+| **Stage 2: End-to-End (LoRA + Temporal)** | **78.4% ± 2.3%** | **0.778 ± 0.026** | **+15.2 pp** |
+
+### Key Observations
+- **+15.2 pp over LoRA-only baseline** — temporal module adds clear value beyond just fine-tuning.
+- **Variance dropped sharply**: ±2.3% vs ±6.7% for LoRA-only. The temporal module stabilizes prediction across participant splits.
+- **Stage 2 adds +2.4 pp** over Stage 1 — joint optimization of LoRA + temporal module is worth the extra A100 hours.
+- **Best epoch = 3 across all folds**: cosine LR schedule hits its floor at epoch 4, causing a slight dip. Consider training with 4 epochs or a longer schedule in future runs.
+- **Churros remains easiest** (85.3%) — consistent with IMWUT finding (52.0% zero-shot → now 85.3%, biggest per-food gain).
+- **Carrots remains hardest** (76.7%) — still the most visually ambiguous food type.
 
 ---
 
